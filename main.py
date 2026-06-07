@@ -1,30 +1,3 @@
-"""
-=============================================================================
-  OS Algorithm Simulator - Main Application
-  Design System: "Systemic Precision" (Deep Space Dark Mode)
-=============================================================================
-
-  HOW TO NAVIGATE THIS FILE:
-  ─────────────────────────────────────────────────────────────────────────
-  Search for these section tags to jump to key areas:
-    [COLORS]       - All color constants used throughout the app
-    [FONTS]        - Font size/weight definitions
-    [SIDEBAR]      - Left navigation panel
-    [HOME PAGE]    - Home/dashboard screen with module cards
-    [CPU PAGE]     - CPU Scheduling module UI
-    [CONTROLS]     - Right-side controls panel (algorithm picker, sliders)
-    [PROCESS TABLE]- The scrollable process queue table
-    [METRICS]      - Bottom metrics section (Avg Wait, Turnaround, CPU %)
-    [ABOUT US]     - The about-us card at the bottom of the sidebar
-    [MAIN APP]     - App window setup and page switching logic
-  ─────────────────────────────────────────────────────────────────────────
-
-  REQUIREMENTS:
-    pip install customtkinter
-=============================================================================
-"""
-
-# pyrefly: ignore [missing-import]
 import customtkinter as ctk
 from tkinter import ttk
 import tkinter as tk
