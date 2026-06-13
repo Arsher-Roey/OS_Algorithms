@@ -1,8 +1,17 @@
 import customtkinter as ctk
 from tkinter import ttk
 import tkinter as tk
+import io
+
+import matplotlib
+matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import algorithms
+from algorithms.disk_scheduling import DISK_REGISTRY, DIRECTION_ALGORITHMS
+
 
 COLORS = {
     "bg":               "#111316",
@@ -44,6 +53,7 @@ COLORS = {
     "icon_sec":     "#2d1a1a",
 }
 
+
 FONTS = {
     "headline_lg": ("Inter", 28, "bold"),
     "headline_md": ("Inter", 20, "bold"),
@@ -58,12 +68,14 @@ FONTS = {
     "metric_val":  ("JetBrains Mono", 13, "bold"),
 }
 
+
 ABOUT_US_TEXT = (
     "The OS Simulator project is an educational platform designed to "
     "visualize complex kernel operations. Developed for students and "
     "enthusiasts to explore low-level system logic through interactive, "
     "real-time algorithmic execution."
 )
+
 
 class Sidebar(ctk.CTkFrame):
 
@@ -198,6 +210,7 @@ class Sidebar(ctk.CTkFrame):
             wraplength=190,
             justify="left",
         ).pack(anchor="w", padx=14, pady=(0, 14))
+
 
 class HomePage(ctk.CTkFrame):
 
@@ -378,6 +391,7 @@ class HomePage(ctk.CTkFrame):
         link_btn.pack(anchor="w", padx=inner_pad - 6, pady=(10, inner_pad))
 
         return card
+
 
 class CPUSchedulingPage(ctk.CTkFrame):
 
@@ -856,6 +870,7 @@ class CPUSchedulingPage(ctk.CTkFrame):
         self.update_metric("avg_turn", "8.5 ms")
         self.update_metric("cpu_util", "92%")
 
+
 class PlaceholderPage(ctk.CTkFrame):
 
     def __init__(self, master, title, icon, **kwargs):
@@ -882,7 +897,9 @@ class PlaceholderPage(ctk.CTkFrame):
             justify="center",
         ).pack(pady=(8, 0))
 
+
 VM_ALGORITHMS = list(algorithms.REGISTRY.keys())
+
 
 class VirtualMemoryPage(ctk.CTkFrame):
 
@@ -965,6 +982,34 @@ class VirtualMemoryPage(ctk.CTkFrame):
             font=FONTS["headline_sm"],
             text_color=COLORS["text_primary"],
         ).pack(side="left")
+
+        ctk.CTkButton(
+            header,
+            text="✕  Remove All",
+            font=FONTS["body_sm"],
+            height=28,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text_muted"],
+            hover_color=COLORS["status_terminated_bg"],
+            command=self._remove_all_tiles,
+        ).pack(side="right", padx=(0, 6))
+
+        self._done_tile_btn = ctk.CTkButton(
+            header,
+            text="✓  Done",
+            font=FONTS["body_sm"],
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["secondary"],
+            text_color="#003827",
+            hover_color=COLORS["secondary_dark"],
+            state="disabled",
+            command=self._deselect_tile,
+        )
+        self._done_tile_btn.pack(side="right", padx=(0, 6))
 
         self._remove_tile_btn = ctk.CTkButton(
             header,
@@ -1060,6 +1105,20 @@ class VirtualMemoryPage(ctk.CTkFrame):
         self._refresh_queue_tiles()
         state = "normal" if self._selected_tile_idx is not None else "disabled"
         self._remove_tile_btn.configure(state=state)
+        self._done_tile_btn.configure(state=state)
+
+    def _deselect_tile(self):
+        self._selected_tile_idx = None
+        self._refresh_queue_tiles()
+        self._remove_tile_btn.configure(state="disabled")
+        self._done_tile_btn.configure(state="disabled")
+
+    def _remove_all_tiles(self):
+        self.ref_string.clear()
+        self._selected_tile_idx = None
+        self._remove_tile_btn.configure(state="disabled")
+        self._done_tile_btn.configure(state="disabled")
+        self._refresh_queue_tiles()
 
     def _remove_selected_tile(self):
         idx = self._selected_tile_idx
@@ -1067,6 +1126,7 @@ class VirtualMemoryPage(ctk.CTkFrame):
             self.ref_string.pop(idx)
             self._selected_tile_idx = None
             self._remove_tile_btn.configure(state="disabled")
+            self._done_tile_btn.configure(state="disabled")
             self._refresh_queue_tiles()
 
     def _draw_frames_empty_state(self):
@@ -1448,6 +1508,753 @@ class VirtualMemoryPage(ctk.CTkFrame):
     def _divider(self, parent):
         ctk.CTkFrame(parent, fg_color=COLORS["border"], height=1).pack(fill="x", padx=0, pady=4)
 
+
+DISK_ALGORITHMS = list(DISK_REGISTRY.keys())
+
+
+class MassStoragePage(ctk.CTkFrame):
+
+    def __init__(self, master, **kwargs):
+        super().__init__(master, fg_color=COLORS["bg"], corner_radius=0, **kwargs)
+
+        self.track_queue   = [98, 183, 37, 122, 14, 124, 65, 67]
+        self.head_pos      = 53
+        self.visit_order   = []
+        self.total_movement = 0
+
+        self._selected_tile_idx: int | None = None
+
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=0)
+        self.rowconfigure(0, weight=1)
+
+        self._build_main_area()
+        self._build_config_panel()
+
+    def _build_main_area(self):
+        main = ctk.CTkScrollableFrame(
+            self,
+            fg_color="transparent",
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["primary"],
+        )
+        main.grid(row=0, column=0, sticky="nsew", padx=(32, 16), pady=24)
+        main.columnconfigure(0, weight=1)
+        self._main_scroll = main
+
+        ctk.CTkLabel(
+            main,
+            text="Mass Storage Management Module",
+            font=FONTS["headline_lg"],
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x")
+
+        ctk.CTkLabel(
+            main,
+            text="Visualize and analyze disk scheduling algorithms in real-time.",
+            font=FONTS["body_md"],
+            text_color=COLORS["text_secondary"],
+            anchor="w",
+        ).pack(fill="x", pady=(4, 20))
+
+        self._build_request_queue_panel(main)
+
+        ctk.CTkFrame(main, fg_color=COLORS["border"], height=1).pack(fill="x", pady=(16, 0))
+
+        self._graph_container = ctk.CTkFrame(
+            main,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._graph_container.pack(fill="both", expand=True, pady=(16, 0))
+        self._draw_graph_empty_state()
+
+    def _build_request_queue_panel(self, parent):
+        panel = ctk.CTkFrame(
+            parent,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        panel.pack(fill="x")
+
+        header = ctk.CTkFrame(panel, fg_color="transparent")
+        header.pack(fill="x", padx=20, pady=(14, 10))
+
+        ctk.CTkLabel(
+            header,
+            text="[·]  Request Queue",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+
+        self._queue_count_label = ctk.CTkLabel(
+            header,
+            text=f"Array [{len(self.track_queue)}]",
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_muted"],
+        )
+        self._queue_count_label.pack(side="left", padx=10)
+
+        ctk.CTkButton(
+            header,
+            text="✕  Remove All",
+            font=FONTS["body_sm"],
+            height=28,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text_muted"],
+            hover_color=COLORS["status_terminated_bg"],
+            command=self._remove_all_tracks,
+        ).pack(side="right", padx=(0, 6))
+
+        self._done_track_btn = ctk.CTkButton(
+            header,
+            text="✓  Done",
+            font=FONTS["body_sm"],
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["secondary"],
+            text_color="#003827",
+            hover_color=COLORS["secondary_dark"],
+            state="disabled",
+            command=self._deselect_track,
+        )
+        self._done_track_btn.pack(side="right", padx=(0, 6))
+
+        self._remove_track_btn = ctk.CTkButton(
+            header,
+            text="✕  Remove",
+            font=FONTS["body_sm"],
+            height=28,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text_muted"],
+            hover_color=COLORS["status_terminated_bg"],
+            state="disabled",
+            command=self._remove_selected_track,
+        )
+        self._remove_track_btn.pack(side="right")
+
+        tile_canvas_frame = ctk.CTkFrame(
+            panel,
+            fg_color=COLORS["bg"],
+            corner_radius=10,
+        )
+        tile_canvas_frame.pack(fill="x", padx=20, pady=(0, 16))
+
+        self._queue_tiles_frame = ctk.CTkScrollableFrame(
+            tile_canvas_frame,
+            orientation="horizontal",
+            fg_color="transparent",
+            height=72,
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["primary"],
+        )
+        self._queue_tiles_frame.pack(fill="x", padx=8, pady=8)
+
+        self._refresh_queue_tiles()
+
+    def _refresh_queue_tiles(self):
+        for w in self._queue_tiles_frame.winfo_children():
+            w.destroy()
+
+        for idx, track_num in enumerate(self.track_queue):
+            is_selected = (idx == self._selected_tile_idx)
+
+            tile_bg     = COLORS["status_running_bg"] if is_selected else COLORS["bg_elevated"]
+            tile_border = COLORS["secondary"]          if is_selected else COLORS["border"]
+            text_color  = COLORS["secondary"]          if is_selected else COLORS["text_primary"]
+            border_w    = 2                             if is_selected else 1
+
+            tile_outer = ctk.CTkFrame(
+                self._queue_tiles_frame,
+                width=58, height=54,
+                fg_color="transparent",
+                corner_radius=11,
+            )
+            tile_outer.pack_propagate(False)
+            tile_outer.pack(side="left", padx=(3, 3), pady=4)
+
+            if is_selected:
+                stripe = ctk.CTkFrame(
+                    tile_outer,
+                    width=4,
+                    fg_color=COLORS["secondary"],
+                    corner_radius=4,
+                )
+                stripe.pack(side="left", fill="y", padx=(0, 2))
+
+            tile = ctk.CTkFrame(
+                tile_outer,
+                fg_color=tile_bg,
+                corner_radius=10,
+                border_width=border_w,
+                border_color=tile_border,
+            )
+            tile.pack(fill="both", expand=True)
+
+            ctk.CTkLabel(
+                tile,
+                text=str(track_num),
+                font=("JetBrains Mono", 14, "bold"),
+                text_color=text_color,
+            ).place(relx=0.5, rely=0.5, anchor="center")
+
+            for widget in (tile_outer, tile):
+                widget.bind("<Button-1>", lambda e, i=idx: self._select_track(i))
+            for child in tile.winfo_children():
+                child.bind("<Button-1>", lambda e, i=idx: self._select_track(i))
+
+        if hasattr(self, "_queue_count_label"):
+            self._queue_count_label.configure(text=f"Array [{len(self.track_queue)}]")
+
+    def _select_track(self, idx: int):
+        self._selected_tile_idx = None if self._selected_tile_idx == idx else idx
+        self._refresh_queue_tiles()
+        state = "normal" if self._selected_tile_idx is not None else "disabled"
+        self._remove_track_btn.configure(state=state)
+        self._done_track_btn.configure(state=state)
+
+    def _deselect_track(self):
+        self._selected_tile_idx = None
+        self._refresh_queue_tiles()
+        self._remove_track_btn.configure(state="disabled")
+        self._done_track_btn.configure(state="disabled")
+
+    def _remove_selected_track(self):
+        idx = self._selected_tile_idx
+        if idx is not None and 0 <= idx < len(self.track_queue):
+            self.track_queue.pop(idx)
+            self._selected_tile_idx = None
+            self._remove_track_btn.configure(state="disabled")
+            self._done_track_btn.configure(state="disabled")
+            self._refresh_queue_tiles()
+
+    def _remove_all_tracks(self):
+        self.track_queue.clear()
+        self._selected_tile_idx = None
+        if hasattr(self, "_remove_track_btn"):
+            self._remove_track_btn.configure(state="disabled")
+            self._done_track_btn.configure(state="disabled")
+        self._refresh_queue_tiles()
+
+    def _draw_graph_empty_state(self):
+        for w in self._graph_container.winfo_children():
+            w.destroy()
+
+        title_bar = ctk.CTkFrame(self._graph_container, fg_color="transparent")
+        title_bar.pack(fill="x", padx=20, pady=(14, 8))
+        ctk.CTkLabel(
+            title_bar,
+            text="≈  Disk Scheduling Graph",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+
+        placeholder = ctk.CTkFrame(self._graph_container, fg_color="transparent")
+        placeholder.pack(expand=True, fill="both", pady=40)
+
+        ctk.CTkLabel(
+            placeholder,
+            text="💿",
+            font=("Inter", 48),
+            text_color=COLORS["text_muted"],
+        ).pack(pady=(20, 8))
+
+        ctk.CTkLabel(
+            placeholder,
+            text="Disk scheduling graph will render here after simulation.\n"
+                 "Configure parameters in the panel and click Run Simulation.",
+            font=FONTS["body_md"],
+            text_color=COLORS["text_muted"],
+            justify="center",
+        ).pack()
+
+    def _draw_graph(self):
+        for w in self._graph_container.winfo_children():
+            w.destroy()
+
+        title_bar = ctk.CTkFrame(self._graph_container, fg_color="transparent")
+        title_bar.pack(fill="x", padx=20, pady=(14, 8))
+
+        ctk.CTkLabel(
+            title_bar,
+            text="≈  Disk Scheduling Graph",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+
+        legend_frame = ctk.CTkFrame(title_bar, fg_color="transparent")
+        legend_frame.pack(side="right")
+        ctk.CTkLabel(
+            legend_frame, text="●", font=("Inter", 10),
+            text_color=COLORS["primary"]
+        ).pack(side="left", padx=(0, 3))
+        ctk.CTkLabel(
+            legend_frame, text="Head Path", font=FONTS["body_sm"],
+            text_color=COLORS["text_muted"]
+        ).pack(side="left")
+
+        algo_name = self.disk_algo_var.get()
+        is_cscan  = (algo_name == "C-Scan")
+
+        numeric_order = [int(t.rstrip("+")) for t in self.visit_order]
+        full_sequence = [self.head_pos] + numeric_order
+
+        bg     = "#111316"
+        panel  = "#1e2023"
+        accent = "#4a8eff"
+        muted  = "#8b90a0"
+        txt    = "#e2e2e6"
+
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        fig.patch.set_facecolor(bg)
+        ax.set_facecolor(panel)
+
+        n = len(full_sequence)
+
+        for i in range(n - 1):
+            x0, x1 = full_sequence[i], full_sequence[i + 1]
+            y0, y1 = i, i + 1
+
+            is_jump = is_cscan and (x0 - x1) > 50
+
+            color      = "#ff6b6b" if is_jump else accent
+            linestyle  = "dashed"  if is_jump else "solid"
+            lw         = 1.2       if is_jump else 1.8
+
+            ax.annotate(
+                "",
+                xy=(x1, y1), xytext=(x0, y0),
+                arrowprops=dict(
+                    arrowstyle="->",
+                    color=color,
+                    lw=lw,
+                    linestyle=linestyle,
+                    connectionstyle="arc3,rad=0.0",
+                ),
+            )
+
+        for i, pos in enumerate(full_sequence):
+            dot_color = "#44dfab" if i == 0 else accent
+            ax.plot(pos, i, "o", color=dot_color, markersize=6, zorder=5)
+            ax.text(
+                pos, i - 0.35,
+                str(pos),
+                ha="center", va="bottom",
+                fontsize=7.5, color=txt,
+                fontfamily="monospace",
+            )
+
+        ax.set_ylim(n, -0.8)
+        ax.set_yticks(range(n))
+        y_labels = ["Head"] + [str(v) for v in self.visit_order]
+        ax.set_yticklabels(y_labels, fontsize=8, color=muted)
+
+        ax.set_xlabel("Disk Track", color=muted, fontsize=9)
+        ax.tick_params(axis="x", colors=muted, labelsize=8)
+        ax.tick_params(axis="y", colors=muted, labelsize=8)
+
+        ax.set_title(
+            f"{algo_name}  —  Total Movement: {self.total_movement} tracks",
+            color=txt, fontsize=10, pad=10,
+        )
+
+        for spine in ax.spines.values():
+            spine.set_edgecolor("#414754")
+        ax.grid(axis="x", color="#414754", linestyle="--", linewidth=0.5, alpha=0.5)
+
+        fig.tight_layout(pad=1.2)
+
+        canvas_widget = ctk.CTkFrame(
+            self._graph_container,
+            fg_color=bg,
+            corner_radius=10,
+        )
+        canvas_widget.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+
+        canvas = FigureCanvasTkAgg(fig, master=canvas_widget)
+        canvas.draw()
+        canvas.get_tk_widget().configure(bg=bg, highlightthickness=0)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        plt.close(fig)
+
+    def _build_config_panel(self):
+        panel = ctk.CTkFrame(
+            self,
+            width=300,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=0,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        panel.grid(row=0, column=1, sticky="nsew")
+        panel.grid_propagate(False)
+
+        scroll = ctk.CTkScrollableFrame(
+            panel,
+            fg_color="transparent",
+            scrollbar_button_color=COLORS["border"],
+        )
+        scroll.pack(fill="both", expand=True)
+
+        header_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        header_row.pack(fill="x", padx=16, pady=(20, 16))
+
+        ctk.CTkLabel(
+            header_row,
+            text="≡  Configuration",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+
+        self._divider(scroll)
+
+        ctk.CTkLabel(
+            scroll,
+            text="Scheduling Algorithm",
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_secondary"],
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        self.disk_algo_var = ctk.StringVar(value=DISK_ALGORITHMS[0])
+        ctk.CTkOptionMenu(
+            scroll,
+            variable=self.disk_algo_var,
+            values=DISK_ALGORITHMS,
+            font=FONTS["body_md"],
+            dropdown_font=FONTS["body_md"],
+            fg_color=COLORS["bg_elevated"],
+            button_color=COLORS["bg_highest"],
+            button_hover_color=COLORS["primary"],
+            dropdown_fg_color=COLORS["bg_elevated"],
+            text_color=COLORS["text_primary"],
+            command=self._on_algo_change,
+        ).pack(fill="x", padx=16, pady=(0, 8))
+
+        self._divider(scroll)
+
+        self._direction_frame = ctk.CTkFrame(
+            scroll,
+            fg_color=COLORS["bg_elevated"],
+            corner_radius=10,
+        )
+
+        dir_inner = ctk.CTkFrame(self._direction_frame, fg_color="transparent")
+        dir_inner.pack(fill="x", padx=14, pady=10)
+
+        ctk.CTkLabel(
+            dir_inner,
+            text="Direction",
+            font=FONTS["label_caps"],
+            text_color=COLORS["text_muted"],
+        ).pack(anchor="w", pady=(0, 6))
+
+        dir_row = ctk.CTkFrame(dir_inner, fg_color="transparent")
+        dir_row.pack(fill="x")
+
+        self._dir_down_label = ctk.CTkLabel(
+            dir_row,
+            text="↓  DOWN",
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_secondary"],
+        )
+        self._dir_down_label.pack(side="left")
+
+        self._direction_switch = ctk.CTkSwitch(
+            dir_row,
+            text="",
+            width=46,
+            onvalue="up",
+            offvalue="down",
+            fg_color=COLORS["border"],
+            progress_color=COLORS["primary"],
+            button_color=COLORS["text_primary"],
+            button_hover_color=COLORS["primary_light"],
+            command=self._on_direction_change,
+        )
+        self._direction_switch.select()
+        self._direction_switch.pack(side="left", padx=8)
+
+        self._dir_up_label = ctk.CTkLabel(
+            dir_row,
+            text="↑  UP",
+            font=("Inter", 11, "bold"),
+            text_color=COLORS["primary_light"],
+        )
+        self._dir_up_label.pack(side="left")
+
+        self._divider(scroll)
+
+        ctk.CTkLabel(
+            scroll,
+            text="Disk Size (tracks)",
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_secondary"],
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        self.disk_size_entry = ctk.CTkEntry(
+            scroll,
+            placeholder_text="e.g. 200",
+            font=FONTS["data_md"],
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            border_width=1,
+            text_color=COLORS["text_primary"],
+        )
+        self.disk_size_entry.insert(0, "200")
+        self.disk_size_entry.pack(fill="x", padx=16, pady=(0, 8))
+
+        self._divider(scroll)
+
+        if DISK_ALGORITHMS[0] in DIRECTION_ALGORITHMS:
+            self._direction_frame.pack(fill="x", padx=16, pady=(4, 0))
+            self._divider(scroll)
+
+        ctk.CTkLabel(
+            scroll,
+            text="Current Head Position",
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_secondary"],
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        head_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        head_row.pack(fill="x", padx=16, pady=(0, 8))
+        head_row.columnconfigure(0, weight=1)
+        head_row.columnconfigure(1, weight=0)
+
+        self.head_entry = ctk.CTkEntry(
+            head_row,
+            placeholder_text="e.g. 53",
+            font=FONTS["data_md"],
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            border_width=1,
+            text_color=COLORS["text_primary"],
+        )
+        self.head_entry.insert(0, str(self.head_pos))
+        self.head_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+
+        ctk.CTkButton(
+            head_row,
+            text="↺",
+            width=36, height=36,
+            font=("Inter", 18),
+            corner_radius=8,
+            fg_color=COLORS["bg_elevated"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+            hover_color=COLORS["primary"],
+            command=self._on_reset_head,
+        ).grid(row=0, column=1)
+
+        self._divider(scroll)
+
+        ctk.CTkLabel(
+            scroll,
+            text="Add Track Request",
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_secondary"],
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        track_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        track_row.pack(fill="x", padx=16, pady=(0, 8))
+        track_row.columnconfigure(0, weight=1)
+        track_row.columnconfigure(1, weight=0)
+
+        self.track_entry = ctk.CTkEntry(
+            track_row,
+            placeholder_text="e.g. 150",
+            font=FONTS["data_md"],
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            border_width=1,
+            text_color=COLORS["text_primary"],
+        )
+        self.track_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+
+        ctk.CTkButton(
+            track_row,
+            text="＋",
+            width=36, height=36,
+            font=("Inter", 18, "bold"),
+            corner_radius=8,
+            fg_color=COLORS["bg_elevated"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+            hover_color=COLORS["primary"],
+            command=self._on_add_track,
+        ).grid(row=0, column=1)
+
+        self._divider(scroll)
+
+        movement_box = ctk.CTkFrame(
+            scroll,
+            fg_color=COLORS["bg"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        movement_box.pack(fill="x", padx=16, pady=(12, 8))
+
+        ctk.CTkLabel(
+            movement_box,
+            text="TOTAL MOVEMENT",
+            font=FONTS["label_caps"],
+            text_color=COLORS["text_muted"],
+        ).pack(pady=(12, 4))
+
+        self.movement_label = ctk.CTkLabel(
+            movement_box,
+            text="0",
+            font=("JetBrains Mono", 36, "bold"),
+            text_color=COLORS["text_primary"],
+        )
+        self.movement_label.pack(pady=(0, 4))
+
+        ctk.CTkLabel(
+            movement_box,
+            text="tracks",
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_muted"],
+        ).pack(pady=(0, 12))
+
+        self._divider(scroll)
+
+        ctk.CTkLabel(
+            scroll,
+            text="DISK MOVEMENT",
+            font=FONTS["label_caps"],
+            text_color=COLORS["text_muted"],
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        self.movement_output = ctk.CTkTextbox(
+            scroll,
+            height=80,
+            font=FONTS["data_sm"],
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            border_width=1,
+            text_color=COLORS["text_primary"],
+            wrap="word",
+            state="disabled",
+        )
+        self.movement_output.pack(fill="x", padx=16, pady=(0, 8))
+
+        self._divider(scroll)
+
+        ctk.CTkButton(
+            scroll,
+            text="▶  Run Simulation",
+            font=FONTS["button"],
+            height=52,
+            corner_radius=10,
+            fg_color=COLORS["primary"],
+            hover_color=COLORS["primary_light"],
+            text_color="#ffffff",
+            command=self._on_run_simulation,
+        ).pack(fill="x", padx=16, pady=16)
+
+        ctk.CTkFrame(scroll, fg_color="transparent", height=20).pack()
+
+    def _on_reset_head(self):
+        self.head_entry.delete(0, "end")
+        self.head_entry.insert(0, str(self.head_pos))
+
+    def _on_add_track(self):
+        raw = self.track_entry.get().strip()
+        if raw.isdigit():
+            val = int(raw)
+            disk_sz = self._get_disk_size()
+            if 0 <= val < disk_sz:
+                self.track_queue.append(val)
+                self._refresh_queue_tiles()
+                self.track_entry.delete(0, "end")
+
+    def _on_algo_change(self, algo: str):
+        if algo in DIRECTION_ALGORITHMS:
+            self._direction_frame.pack(fill="x", padx=16, pady=(4, 0))
+        else:
+            self._direction_frame.pack_forget()
+
+    def _on_direction_change(self):
+        direction = self._direction_switch.get()
+        if direction == "up":
+            self._dir_up_label.configure(
+                font=("Inter", 11, "bold"), text_color=COLORS["primary_light"]
+            )
+            self._dir_down_label.configure(
+                font=FONTS["body_sm"], text_color=COLORS["text_secondary"]
+            )
+        else:
+            self._dir_down_label.configure(
+                font=("Inter", 11, "bold"), text_color=COLORS["primary_light"]
+            )
+            self._dir_up_label.configure(
+                font=FONTS["body_sm"], text_color=COLORS["text_secondary"]
+            )
+
+    def _get_disk_size(self) -> int:
+        raw = self.disk_size_entry.get().strip()
+        if raw.isdigit() and int(raw) > 0:
+            return int(raw)
+        return 200
+
+    def _on_run_simulation(self):
+        raw_head = self.head_entry.get().strip()
+        if not raw_head.isdigit():
+            return
+        self.head_pos = int(raw_head)
+
+        if not self.track_queue:
+            return
+
+        algo_name = self.disk_algo_var.get()
+        algo_fn   = DISK_REGISTRY.get(algo_name)
+        if algo_fn is None:
+            return
+
+        disk_size = self._get_disk_size()
+        direction = self._direction_switch.get()
+
+        self.visit_order, raw_total = algo_fn(
+            list(self.track_queue), self.head_pos,
+            disk_size=disk_size, direction=direction,
+        )
+
+        if isinstance(raw_total, str):
+            self.total_movement = int(raw_total.rstrip("+"))
+            total_display = raw_total
+        else:
+            self.total_movement = raw_total
+            total_display = str(raw_total)
+
+        self.movement_label.configure(text=total_display)
+
+        order_str = " → ".join([str(self.head_pos)] + self.visit_order)
+        self.movement_output.configure(state="normal")
+        self.movement_output.delete("1.0", "end")
+        self.movement_output.insert("1.0", order_str)
+        self.movement_output.configure(state="disabled")
+
+        self._draw_graph()
+
+    def _divider(self, parent):
+        ctk.CTkFrame(parent, fg_color=COLORS["border"], height=1).pack(fill="x", padx=0, pady=4)
+
+
 class OSSimulatorApp(ctk.CTk):
 
     def __init__(self):
@@ -1492,9 +2299,12 @@ class OSSimulatorApp(ctk.CTk):
         vm.grid(row=0, column=0, sticky="nsew")
         self.pages["Virtual Memory"] = vm
 
+        disk = MassStoragePage(self.content)
+        disk.grid(row=0, column=0, sticky="nsew")
+        self.pages["Disk Management"] = disk
+
         placeholder_modules = [
             ("Memory Management",   "Memory Management",   "🗂"),
-            ("Disk Management",     "Disk Management",     "💾"),
             ("Security Management", "Security Management", "🛡"),
         ]
         for page_key, title, icon in placeholder_modules:
@@ -1506,6 +2316,7 @@ class OSSimulatorApp(ctk.CTk):
         if page_key in self.pages:
             self.pages[page_key].tkraise()
             self.sidebar.set_active(page_key)
+
 
 if __name__ == "__main__":
     app = OSSimulatorApp()
