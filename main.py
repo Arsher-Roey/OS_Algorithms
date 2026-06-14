@@ -399,10 +399,10 @@ class CPUSchedulingPage(ctk.CTkFrame):
         super().__init__(master, fg_color=COLORS["bg"], corner_radius=0, **kwargs)
 
         self.processes = [
-            {"pid": "P1", "arrival": 0, "burst": 5, "priority": 2, "status": "Waiting"},
-            {"pid": "P2", "arrival": 1, "burst": 5, "priority": 1, "status": "Terminated"},
-            {"pid": "P3", "arrival": 2, "burst": 4, "priority": 3, "status": "Running"},
-            {"pid": "P4", "arrival": 6, "burst": 2, "priority": 4, "status": "Ready"},
+            {"pid": "P1", "arrival": 0, "burst": 5, "priority": 2},
+            {"pid": "P2", "arrival": 1, "burst": 5, "priority": 1},
+            {"pid": "P3", "arrival": 2, "burst": 4, "priority": 3},
+            {"pid": "P4", "arrival": 6, "burst": 2, "priority": 4},
         ]
 
         self.columnconfigure(0, weight=1)
@@ -445,7 +445,74 @@ class CPUSchedulingPage(ctk.CTkFrame):
         )
         progress_bar.grid(row=2, column=0, sticky="ew", pady=(0, 16))
 
-        self._build_process_table(main, row=3)
+        self._build_gantt_area(main, row=3)
+
+        self._build_process_table(main, row=4)
+
+    def _build_gantt_area(self, parent, row):
+        container = ctk.CTkFrame(
+            parent,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+            height=160,
+        )
+        container.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+        container.pack_propagate(False)
+        self._gantt_container = container
+        lbl = ctk.CTkLabel(
+            container,
+            text="Gantt chart will render here after running a simulation.",
+            font=FONTS["body_md"],
+            text_color=COLORS["text_muted"],
+        )
+        lbl.place(relx=0.5, rely=0.5, anchor="center")
+
+    def _draw_gantt(self, timeline: list[dict]):
+        try:
+            if hasattr(self, "_gantt_canvas") and self._gantt_canvas is not None:
+                self._gantt_canvas.get_tk_widget().destroy()
+        except Exception:
+            pass
+
+        for w in self._gantt_container.winfo_children():
+            w.destroy()
+
+        if not timeline:
+            ctk.CTkLabel(
+                self._gantt_container,
+                text="No timeline available for selected algorithm.",
+                font=FONTS["body_md"],
+                text_color=COLORS["text_muted"],
+            ).place(relx=0.5, rely=0.5, anchor="center")
+            return
+
+        pids = list({entry["pid"] for entry in timeline})
+        pid_earliest = {pid: min(e["start"] for e in timeline if e["pid"] == pid) for pid in pids}
+        pids.sort(key=lambda pid: pid_earliest[pid])
+        y_pos = {pid: (len(pids) - 1 - i) for i, pid in enumerate(pids)}
+
+        fig, ax = plt.subplots(figsize=(6, 1.5 + 0.5 * len(pids)))
+
+        for entry in timeline:
+            pid = entry["pid"]
+            start = entry["start"]
+            finish = entry["finish"]
+            ax.broken_barh([(start, finish - start)], (y_pos[pid] - 0.4, 0.8), facecolors=COLORS["primary"])
+
+        ax.set_yticks([y_pos[pid] for pid in pids])
+        ax.set_yticklabels(pids)
+        ax.set_xlabel("Time")
+        ax.set_xlim(left=0)
+        ax.grid(axis="x", linestyle="--", alpha=0.4)
+        fig.tight_layout()
+
+        canvas = FigureCanvasTkAgg(fig, master=self._gantt_container)
+        canvas.draw()
+        widget = canvas.get_tk_widget()
+        widget.pack(fill="both", expand=True)
+        self._gantt_canvas = canvas
 
     def _build_process_table(self, parent, row):
         table_frame = ctk.CTkFrame(
@@ -488,7 +555,6 @@ class CPUSchedulingPage(ctk.CTkFrame):
             ("Arrival Time", 2),
             ("Burst Time",   2),
             ("Priority",     1),
-            ("Status",       2),
             ("Remove",       1),
         ]
 
@@ -561,33 +627,6 @@ class CPUSchedulingPage(ctk.CTkFrame):
                 anchor="center",
             ).grid(row=0, column=col_idx, sticky="ew")
 
-        status = proc["status"]
-        chip_colors = {
-            "Running":    (COLORS["status_running_bg"],    COLORS["status_running_fg"]),
-            "Waiting":    (COLORS["status_waiting_bg"],    COLORS["status_waiting_fg"]),
-            "Terminated": (COLORS["status_terminated_bg"], COLORS["status_terminated_fg"]),
-            "Ready":      (COLORS["status_ready_bg"],      COLORS["status_ready_fg"]),
-        }
-        chip_bg, chip_fg = chip_colors.get(status, (COLORS["bg_elevated"], COLORS["text_primary"]))
-
-        status_text = f"● {status}" if status == "Running" else status
-
-        chip_wrapper = ctk.CTkFrame(row_frame, fg_color="transparent")
-        chip_wrapper.grid(row=0, column=4, sticky="ew")
-
-        chip = ctk.CTkFrame(
-            chip_wrapper,
-            fg_color=chip_bg,
-            corner_radius=99,
-        )
-        chip.pack(anchor="center")
-        ctk.CTkLabel(
-            chip,
-            text=status_text,
-            font=FONTS["body_sm"],
-            text_color=chip_fg,
-        ).pack(padx=10, pady=3)
-
         ctk.CTkButton(
             row_frame,
             text="🗑",
@@ -597,7 +636,7 @@ class CPUSchedulingPage(ctk.CTkFrame):
             text_color=COLORS["text_muted"],
             hover_color=COLORS["bg_elevated"],
             command=lambda pid=proc["pid"]: self._remove_process(pid),
-        ).grid(row=0, column=5, sticky="ew")
+        ).grid(row=0, column=4, sticky="ew")
 
     def _remove_process(self, pid):
         self.processes = [p for p in self.processes if p["pid"] != pid]
@@ -607,6 +646,9 @@ class CPUSchedulingPage(ctk.CTkFrame):
         name = self.proc_name_entry.get().strip()
         burst = self.burst_entry.get().strip()
         arrival = self.arrival_entry.get().strip()
+        priority_val = "1"
+        if hasattr(self, "priority_entry"):
+            priority_val = self.priority_entry.get().strip() or "1"
 
         if not name or not burst.isdigit() or not arrival.isdigit():
             return
@@ -615,8 +657,7 @@ class CPUSchedulingPage(ctk.CTkFrame):
             "pid":      name,
             "arrival":  int(arrival),
             "burst":    int(burst),
-            "priority": 1,
-            "status":   "Ready",
+            "priority": int(priority_val) if priority_val.isdigit() else 1,
         }
         self.processes.append(new_proc)
         self._refresh_table()
@@ -624,6 +665,8 @@ class CPUSchedulingPage(ctk.CTkFrame):
         self.proc_name_entry.delete(0, "end")
         self.burst_entry.delete(0, "end")
         self.arrival_entry.delete(0, "end")
+        if hasattr(self, "priority_entry"):
+            self.priority_entry.delete(0, "end")
 
     def _build_controls_panel(self):
         panel = ctk.CTkFrame(
@@ -668,7 +711,9 @@ class CPUSchedulingPage(ctk.CTkFrame):
             "Round Robin (RR)",
             "First Come First Served (FCFS)",
             "Shortest Job First (SJF)",
+            "Shortest Job First (SJF) - Preemptive",
             "Priority Scheduling",
+            "Priority Scheduling (Preemptive)",
             "Multilevel Queue",
         ]
 
@@ -749,10 +794,11 @@ class CPUSchedulingPage(ctk.CTkFrame):
         bt_at_row.pack(fill="x", padx=16, pady=(0, 8))
         bt_at_row.columnconfigure(0, weight=1)
         bt_at_row.columnconfigure(1, weight=1)
+        bt_at_row.columnconfigure(2, weight=1)
 
         ctk.CTkLabel(bt_at_row, text="Burst Time", font=FONTS["body_sm"], text_color=COLORS["text_secondary"]).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(bt_at_row, text="Arrival Time", font=FONTS["body_sm"], text_color=COLORS["text_secondary"]).grid(row=0, column=1, sticky="w", padx=(8, 0))
-
+        ctk.CTkLabel(bt_at_row, text="Priority", font=FONTS["body_sm"], text_color=COLORS["text_secondary"]).grid(row=0, column=2, sticky="w", padx=(8, 0))
         self.burst_entry = ctk.CTkEntry(
             bt_at_row,
             placeholder_text="ms",
@@ -774,6 +820,17 @@ class CPUSchedulingPage(ctk.CTkFrame):
             text_color=COLORS["text_primary"],
         )
         self.arrival_entry.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(4, 0))
+
+        self.priority_entry = ctk.CTkEntry(
+            bt_at_row,
+            placeholder_text="1",
+            font=FONTS["data_md"],
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            border_width=1,
+            text_color=COLORS["text_primary"],
+        )
+        self.priority_entry.grid(row=1, column=2, sticky="ew", padx=(8, 0), pady=(4, 0))
 
         ctk.CTkButton(
             scroll,
@@ -864,11 +921,25 @@ class CPUSchedulingPage(ctk.CTkFrame):
         print(f"[Simulation] Algorithm: {algo}, Time Quantum: {tq}ms")
         print(f"[Simulation] Processes: {self.processes}")
 
-        self.progress_var.set(1.0)
+        try:
+            from algorithms import cpu_scheduling
 
-        self.update_metric("avg_wait", "4.2 ms")
-        self.update_metric("avg_turn", "8.5 ms")
-        self.update_metric("cpu_util", "92%")
+            avg_wait, avg_turn, cpu_util, timeline = cpu_scheduling.run(algo, self.processes, tq)
+
+            self.progress_var.set(1.0)
+            self.update_metric("avg_wait", avg_wait)
+            self.update_metric("avg_turn", avg_turn)
+            self.update_metric("cpu_util", cpu_util)
+            try:
+                self._draw_gantt(timeline)
+            except Exception as _:
+                pass
+        except Exception as exc:
+            print("[Simulation] Error running CPU scheduling:", exc)
+            self.progress_var.set(1.0)
+            self.update_metric("avg_wait", "N/A")
+            self.update_metric("avg_turn", "N/A")
+            self.update_metric("cpu_util", "N/A")
 
 
 class PlaceholderPage(ctk.CTkFrame):
