@@ -953,7 +953,7 @@ class MemoryManagementPage(ctk.CTkFrame):
         self.mft_policy_var = ctk.StringVar(value="Best Available Fit")
         self.mvt_policy_var = ctk.StringVar(value="First Fit")
         self.compaction_var = ctk.StringVar(value="No Compaction")
-        self.paging_view_var = ctk.StringVar(value="Allocation View")
+        self.paging_view_var = ctk.StringVar(value="Allocation View")  # retained for compatibility; Paging is hidden in this build
 
         self.control_widgets = []
         self.last_result = None
@@ -989,7 +989,7 @@ class MemoryManagementPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             main,
-            text="Visualize MFT, MVT, and Paging allocation processes with policy-based memory maps.",
+            text="Visualize MFT and MVT allocation processes with policy-based memory maps.",
             font=FONTS["body_md"],
             text_color=COLORS["text_secondary"],
             anchor="w",
@@ -1032,7 +1032,7 @@ class MemoryManagementPage(ctk.CTkFrame):
             self.canvas_holder,
             bg=COLORS["bg_card"],
             highlightthickness=0,
-            height=370,
+            height=430,
         )
         self.memory_canvas.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -1075,14 +1075,14 @@ class MemoryManagementPage(ctk.CTkFrame):
             fg_color=COLORS["bg_panel"],
             corner_radius=16,
             border_width=1,
-            border_color=COLORS["border"],
+            border_color=COLORS["primary"],
         )
         self.result_card.grid(row=0, column=1, sticky="nsew")
         ctk.CTkLabel(
             self.result_card,
-            text="Results",
+            text="📊 Results Summary",
             font=FONTS["headline_sm"],
-            text_color=COLORS["text_primary"],
+            text_color=COLORS["secondary"],
             anchor="w",
         ).pack(fill="x", padx=16, pady=(14, 6))
         self.results_box = ctk.CTkFrame(self.result_card, fg_color="transparent")
@@ -1141,7 +1141,7 @@ class MemoryManagementPage(ctk.CTkFrame):
         ctk.CTkOptionMenu(
             self.params,
             variable=self.scheme_var,
-            values=["MFT", "MVT", "Paging"],
+            values=["MFT", "MVT"],
             command=self._on_scheme_changed,
             fg_color=COLORS["bg_elevated"],
             button_color=COLORS["primary"],
@@ -1155,10 +1155,8 @@ class MemoryManagementPage(ctk.CTkFrame):
         scheme = self.scheme_var.get()
         if scheme == "MFT":
             self._build_mft_controls()
-        elif scheme == "MVT":
-            self._build_mvt_controls()
         else:
-            self._build_paging_controls()
+            self._build_mvt_controls()
 
         self._divider(self.params)
         ctk.CTkButton(
@@ -1255,11 +1253,16 @@ class MemoryManagementPage(ctk.CTkFrame):
 
         self._section_label(self.params, "INITIAL JOBS")
         self.mvt_initial_entry = self._entry(self.params, "A=70, B=40, C=60, D=30")
+        self._build_job_edit_row(self.params, self.mvt_initial_entry, default_name="J", default_size="20")
+
         self._section_label(self.params, "RELEASE JOBS")
         self.mvt_release_entry = self._entry(self.params, "B, D")
+        self._build_release_edit_row(self.params, self.mvt_release_entry, default_name="B")
         self._hint(self.params, "These jobs finish first, creating scattered holes.")
+
         self._section_label(self.params, "INCOMING JOBS")
         self.mvt_incoming_entry = self._entry(self.params, "E=65")
+        self._build_job_edit_row(self.params, self.mvt_incoming_entry, default_name="N", default_size="50")
         self._hint(self.params, "Use this to see the difference between compaction on/off.")
 
     def _build_paging_controls(self):
@@ -1345,6 +1348,116 @@ class MemoryManagementPage(ctk.CTkFrame):
         entry.insert(0, text)
         return entry
 
+    def _build_job_edit_row(self, parent, target_entry, default_name="J", default_size="20"):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=(0, 6))
+        row.columnconfigure(0, weight=1)
+        row.columnconfigure(1, weight=1)
+        row.columnconfigure(2, weight=1)
+        name_entry = ctk.CTkEntry(
+            row,
+            height=30,
+            width=54,
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+        )
+        name_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        name_entry.insert(0, default_name)
+        size_entry = ctk.CTkEntry(
+            row,
+            height=30,
+            width=64,
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+        )
+        size_entry.grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        size_entry.insert(0, default_size)
+        ctk.CTkButton(
+            row,
+            text="+ Add",
+            font=FONTS["button"],
+            height=30,
+            corner_radius=8,
+            fg_color=COLORS["secondary"],
+            hover_color=COLORS["secondary_dark"],
+            text_color=COLORS["bg"],
+            command=lambda: self._append_job_from_inputs(target_entry, name_entry, size_entry),
+        ).grid(row=0, column=2, sticky="ew")
+        ctk.CTkButton(
+            parent,
+            text="− Remove Last",
+            font=FONTS["body_sm"],
+            height=30,
+            corner_radius=8,
+            fg_color=COLORS["bg_elevated"],
+            hover_color=COLORS["bg_highest"],
+            command=lambda: self._remove_last_list_item(target_entry),
+        ).pack(fill="x", padx=20, pady=(0, 8))
+
+    def _build_release_edit_row(self, parent, target_entry, default_name="B"):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=(0, 6))
+        row.columnconfigure(0, weight=1)
+        row.columnconfigure(1, weight=1)
+        name_entry = ctk.CTkEntry(
+            row,
+            height=30,
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+        )
+        name_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        name_entry.insert(0, default_name)
+        ctk.CTkButton(
+            row,
+            text="+ Add",
+            font=FONTS["button"],
+            height=30,
+            corner_radius=8,
+            fg_color=COLORS["secondary"],
+            hover_color=COLORS["secondary_dark"],
+            text_color=COLORS["bg"],
+            command=lambda: self._append_release_from_input(target_entry, name_entry),
+        ).grid(row=0, column=1, sticky="ew")
+        ctk.CTkButton(
+            parent,
+            text="− Remove Last",
+            font=FONTS["body_sm"],
+            height=30,
+            corner_radius=8,
+            fg_color=COLORS["bg_elevated"],
+            hover_color=COLORS["bg_highest"],
+            command=lambda: self._remove_last_list_item(target_entry),
+        ).pack(fill="x", padx=20, pady=(0, 8))
+
+    def _append_to_comma_entry(self, entry, item):
+        item = str(item).strip()
+        if not item:
+            return
+        current = entry.get().strip()
+        entry.delete(0, "end")
+        entry.insert(0, f"{current}, {item}" if current else item)
+
+    def _append_job_from_inputs(self, target_entry, name_entry, size_entry):
+        name = name_entry.get().strip().replace("=", "")
+        size = size_entry.get().strip().upper().replace("K", "")
+        if not name or not size:
+            return
+        self._append_to_comma_entry(target_entry, f"{name}={size}")
+
+    def _append_release_from_input(self, target_entry, name_entry):
+        name = name_entry.get().strip().replace("=", "")
+        self._append_to_comma_entry(target_entry, name)
+
+    def _remove_last_list_item(self, entry):
+        items = [item.strip() for item in entry.get().replace(";", ",").split(",") if item.strip()]
+        if items:
+            items.pop()
+        entry.delete(0, "end")
+        entry.insert(0, ", ".join(items))
+
     def _divider(self, parent):
         ctk.CTkFrame(parent, fg_color=COLORS["border"], height=1).pack(fill="x", padx=20, pady=(12, 4))
 
@@ -1361,17 +1474,34 @@ class MemoryManagementPage(ctk.CTkFrame):
     def _parse_jobs(self, text: str, prefix="J") -> list[dict]:
         jobs = []
         auto = 1
+
         for raw in text.replace(";", ",").split(","):
-            item = raw.strip().replace("K", "").replace("k", "")
+            item = raw.strip()
             if not item:
                 continue
+
             if "=" in item:
                 name, size = item.split("=", 1)
-                name = name.strip() or f"{prefix}{auto}"
+                name = name.strip()
+            elif ":" in item:
+                name, size = item.split(":", 1)
+                name = name.strip()
             else:
-                name, size = f"{prefix}{auto}", item
-            jobs.append({"name": name.strip(), "size": int(size.strip())})
+                name = f"{prefix}{auto}"
+                size = item
+                
+            size = size.strip().replace("K", "").replace("k", "")
+
+            if not name:
+                name = f"{prefix}{auto}"
+
+            jobs.append({
+                "name": name.strip(),
+                "size": int(size.strip())
+            })
+
             auto += 1
+
         return jobs
 
     def _parse_names(self, text: str) -> list[str]:
@@ -1429,15 +1559,6 @@ class MemoryManagementPage(ctk.CTkFrame):
                     self.compaction_var.get() == "With Compaction",
                 )
                 self._render_mvt(result)
-            else:
-                result = memalgo.simulate_paging(
-                    int(self.paging_total_entry.get()),
-                    int(self.paging_os_entry.get()),
-                    int(self.paging_page_entry.get()),
-                    int(self.paging_job_entry.get()),
-                    int(self.paging_la_entry.get()),
-                )
-                self._render_paging(result)
         except Exception as exc:
             self._show_error(str(exc))
 
@@ -1445,7 +1566,7 @@ class MemoryManagementPage(ctk.CTkFrame):
         self.memory_canvas.delete("all")
         self.memory_canvas.create_text(
             520, 160,
-            text="Choose MFT, MVT, or Paging, then click Run Simulation.",
+            text="Choose MFT or MVT, then click Run Simulation.",
             fill=COLORS["text_muted"],
             font=("Inter", 13),
             anchor="center",
@@ -1485,11 +1606,15 @@ class MemoryManagementPage(ctk.CTkFrame):
         self._draw_mvt_map(result)
         self._set_steps("\n".join(f"{i+1}. {step}" for i, step in enumerate(result["steps"])))
         waiting = ", ".join(f"{j['name']}({j['size']}K)" for j in result["waiting"]) or "None"
+        incoming_status = ", ".join(
+            f"{j['name']}={j['size']}K: {j['status']}" for j in result.get("incoming_status", [])
+        ) or "None"
         self._set_results([
             ("Free Total", f"{result['free_total']}K"),
             ("Largest Hole", f"{result['largest_hole']}K"),
             ("External Frag", f"{result['external_fragmentation']}K"),
             ("Compaction Used", "Yes" if result["compaction_used"] else "No"),
+            ("Incoming Status", incoming_status),
             ("Waiting", waiting),
         ])
 
@@ -1522,123 +1647,303 @@ class MemoryManagementPage(ctk.CTkFrame):
     def _set_results(self, rows):
         for widget in self.results_box.winfo_children():
             widget.destroy()
+
+        # A compact headline strip makes the result area easier to notice without
+        # breaking the dark dashboard aesthetic.
+        headline = ctk.CTkFrame(
+            self.results_box,
+            fg_color=COLORS["status_running_bg"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["secondary"],
+        )
+        headline.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(
+            headline,
+            text="Simulation Summary",
+            font=FONTS["body_sm"],
+            text_color=COLORS["secondary"],
+        ).pack(side="left", padx=10, pady=8)
+        ctk.CTkLabel(
+            headline,
+            text="LIVE",
+            font=FONTS["metric_val"],
+            text_color=COLORS["secondary"],
+        ).pack(side="right", padx=10, pady=8)
+
         for label, value in rows:
-            row = ctk.CTkFrame(self.results_box, fg_color=COLORS["bg_card"], corner_radius=8)
+            value_text = str(value).lower()
+            is_waiting = (label.lower().startswith("waiting") and value_text != "none") or ("waiting" in value_text)
+            is_frag = "frag" in label.lower() and str(value).strip() not in {"0", "0K"}
+            row_border = COLORS["secondary"] if (is_waiting or is_frag) else COLORS["border"]
+            row_bg = COLORS["status_waiting_bg"] if is_waiting else COLORS["bg_card"]
+            row = ctk.CTkFrame(
+                self.results_box,
+                fg_color=row_bg,
+                corner_radius=10,
+                border_width=1,
+                border_color=row_border,
+            )
             row.pack(fill="x", pady=(0, 8))
-            ctk.CTkLabel(row, text=label, font=FONTS["body_sm"], text_color=COLORS["text_secondary"]).pack(side="left", padx=10, pady=9)
-            ctk.CTkLabel(row, text=str(value), font=FONTS["metric_val"], text_color=COLORS["secondary"]).pack(side="right", padx=10, pady=9)
+            ctk.CTkLabel(
+                row,
+                text=label,
+                font=FONTS["body_sm"],
+                text_color=COLORS["text_secondary"],
+            ).pack(side="left", padx=10, pady=10)
+            ctk.CTkLabel(
+                row,
+                text=str(value),
+                font=FONTS["metric_val"],
+                text_color=COLORS["secondary"],
+                wraplength=170,
+                justify="right",
+            ).pack(side="right", padx=10, pady=10)
 
     # ---------- canvas drawing helpers ----------
     def _draw_rounded_rect(self, x1, y1, x2, y2, fill, outline=None, width=1):
         # Canvas rounded rectangle approximation using normal rectangle for compatibility.
         self.memory_canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline or COLORS["border"], width=width)
 
+    def _scaled_heights(self, sizes, total_height, min_height=18):
+        sizes = [max(0, float(s)) for s in sizes]
+        n = len(sizes)
+        if n == 0:
+            return []
+        if sum(sizes) <= 0:
+            return [total_height / n] * n
+
+        # Prevent maps from exceeding their panel. The minimum height is reduced
+        # automatically when there are too many partitions/blocks.
+        effective_min = min(float(min_height), max(8.0, total_height / n))
+        remaining = set(range(n))
+        heights = [0.0] * n
+        remaining_height = float(total_height)
+        remaining_size = sum(sizes)
+
+        while remaining:
+            if remaining_height <= 0 or remaining_size <= 0:
+                even = max(1.0, float(total_height) / n)
+                return [even] * n
+            too_small = [
+                i for i in remaining
+                if (sizes[i] / remaining_size) * remaining_height < effective_min
+            ]
+            if not too_small:
+                for i in remaining:
+                    heights[i] = (sizes[i] / remaining_size) * remaining_height
+                break
+            for i in too_small:
+                heights[i] = effective_min
+                remaining_height -= effective_min
+                remaining_size -= sizes[i]
+                remaining.remove(i)
+
+        # Correct tiny rounding differences so the last block lands exactly at the bottom.
+        diff = float(total_height) - sum(heights)
+        if heights:
+            heights[-1] += diff
+        return heights
+
+    def _draw_waiting_chips(self, x, y, waiting, title="Waiting Queue", max_items=6):
+        c = self.memory_canvas
+        c.create_text(x, y, text=title, fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        y += 28
+        if not waiting:
+            c.create_rectangle(x, y, x + 300, y + 40, fill=COLORS["status_running_bg"], outline=COLORS["border"])
+            c.create_text(x + 150, y + 20, text="None", fill=COLORS["secondary"], font=("Inter", 11, "bold"))
+            return y + 50
+        for i, job in enumerate(waiting[:max_items]):
+            bx = x + (i % 3) * 105
+            by = y + (i // 3) * 52
+            c.create_rectangle(bx, by, bx + 92, by + 40, fill=COLORS["bg_elevated"], outline=COLORS["secondary"])
+            c.create_text(bx + 46, by + 14, text=str(job["name"]), fill=COLORS["text_primary"], font=("Inter", 10, "bold"))
+            c.create_text(bx + 46, by + 29, text=f"{job['size']}K", fill=COLORS["secondary"], font=("JetBrains Mono", 9, "bold"))
+        if len(waiting) > max_items:
+            c.create_text(x, y + ((max_items + 2) // 3) * 52, text=f"+{len(waiting)-max_items} more waiting", fill=COLORS["text_muted"], font=("Inter", 10), anchor="w")
+        return y + ((min(len(waiting), max_items) + 2) // 3) * 52
+
     def _draw_mft_map(self, result):
         c = self.memory_canvas
         partitions = result["partitions"]
         total_user = sum(p["size"] for p in partitions) or 1
-        bar_x, bar_y, bar_w, bar_h = 70, 40, 260, 290
-        os_h = 40
+        bar_x, bar_y, bar_w, bar_h = 55, 45, 270, 340
+        os_h = 38
         user_h = bar_h - os_h
 
-        c.create_text(bar_x, 18, text="Fixed Partition Memory", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        c.create_text(bar_x, 20, text="Fixed Partition Memory", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
         c.create_rectangle(bar_x, bar_y + user_h, bar_x + bar_w, bar_y + bar_h, fill=COLORS["bg_highest"], outline=COLORS["border"])
         c.create_text(bar_x + bar_w/2, bar_y + user_h + os_h/2, text="OS", fill=COLORS["text_primary"], font=("Inter", 12, "bold"))
 
+        heights = self._scaled_heights([p["size"] for p in partitions], user_h, min_height=30)
         y = bar_y + user_h
-        for part in partitions:
-            h = max(34, user_h * part["size"] / total_user)
+        for part, h in zip(partitions, heights):
             y -= h
             job = part["job"]
-            base_fill = COLORS["status_waiting_bg"] if job else COLORS["bg_elevated"]
-            c.create_rectangle(bar_x, y, bar_x + bar_w, y + h, fill=base_fill, outline=COLORS["border"], width=2)
-            c.create_text(bar_x + 10, y + 15, text=f"Partition {part['index']} · {part['size']}K", fill=COLORS["text_secondary"], font=("Inter", 10), anchor="w")
+            c.create_rectangle(bar_x, y, bar_x + bar_w, y + h, fill=COLORS["status_waiting_bg"], outline=COLORS["border"], width=2)
+
+            header_h = min(18, max(12, h * 0.35))
+            c.create_rectangle(bar_x, y, bar_x + bar_w, y + header_h, fill=COLORS["bg_highest"], outline="")
+            label = f"P{part['index']} · {part['size']}K"
+            c.create_text(bar_x + 9, y + header_h/2, text=label, fill=COLORS["text_primary"], font=("JetBrains Mono", 9, "bold"), anchor="w")
+
             if job:
                 frag = int(part["fragment"])
-                used_ratio = job["size"] / part["size"] if part["size"] else 1
-                used_h = max(18, h * used_ratio)
-                c.create_rectangle(bar_x + 12, y + h - used_h - 6, bar_x + bar_w - 12, y + h - 6, fill=COLORS["primary"], outline="")
-                c.create_text(bar_x + bar_w/2, y + h - used_h/2 - 6, text=f"{job['name']} = {job['size']}K", fill="#ffffff", font=("Inter", 11, "bold"))
-                if frag > 0:
-                    c.create_text(bar_x + bar_w - 12, y + 30, text=f"unused {frag}K", fill=COLORS["secondary"], font=("Inter", 10), anchor="e")
+                body_top = y + header_h + 3
+                body_bottom = y + h - 4
+                body_h = max(4, body_bottom - body_top)
+                used_ratio = min(1, job["size"] / part["size"]) if part["size"] else 1
+                used_h = max(min(14, body_h), body_h * used_ratio)
+                used_y = body_bottom - used_h
+                c.create_rectangle(bar_x + 12, used_y, bar_x + bar_w - 12, body_bottom, fill=COLORS["primary"], outline="")
+                if used_h >= 14:
+                    c.create_text(bar_x + bar_w/2, used_y + used_h/2, text=f"{job['name']} = {job['size']}K", fill="#ffffff", font=("Inter", 10, "bold"))
+                if frag > 0 and body_h >= 20:
+                    c.create_text(bar_x + bar_w - 12, body_top + 8, text=f"unused {frag}K", fill=COLORS["secondary"], font=("Inter", 9, "bold"), anchor="e")
             else:
-                c.create_text(bar_x + bar_w/2, y + h/2 + 8, text="Free", fill=COLORS["text_muted"], font=("Inter", 11))
+                if h >= 22:
+                    c.create_text(bar_x + bar_w/2, y + h/2 + 6, text="Free", fill=COLORS["text_muted"], font=("Inter", 10))
 
         qx = 390
-        c.create_text(qx, 42, text="Waiting Queue", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
-        waiting = result["waiting"]
-        if not waiting:
-            c.create_rectangle(qx, 66, qx + 450, 116, fill=COLORS["status_running_bg"], outline=COLORS["border"])
-            c.create_text(qx + 225, 91, text="All possible jobs were allocated", fill=COLORS["secondary"], font=("Inter", 12, "bold"))
-        else:
-            for i, job in enumerate(waiting):
-                x = qx + (i % 4) * 110
-                y = 70 + (i // 4) * 62
-                c.create_rectangle(x, y, x + 96, y + 44, fill=COLORS["bg_elevated"], outline=COLORS["border"])
-                c.create_text(x + 48, y + 15, text=job["name"], fill=COLORS["text_primary"], font=("Inter", 11, "bold"))
-                c.create_text(x + 48, y + 31, text=f"{job['size']}K", fill=COLORS["text_muted"], font=("Inter", 10))
+        next_y = self._draw_waiting_chips(qx, 48, result["waiting"], max_items=6)
 
-        c.create_text(qx, 170, text="Allocated Partitions", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
-        for i, part in enumerate(partitions):
+        table_y = max(185, next_y + 20)
+        c.create_text(qx, table_y, text="Allocated Partitions", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        row_h = 24 if len(partitions) <= 7 else 20
+        for i, part in enumerate(partitions[:9]):
             job_text = f"{part['job']['name']} ({part['job']['size']}K)" if part["job"] else "Free"
             frag_text = f"Frag: {part['fragment']}K" if part["job"] else ""
-            y = 198 + i * 28
-            c.create_text(qx, y, text=f"P{part['index']} · {part['size']}K", fill=COLORS["text_secondary"], font=("JetBrains Mono", 10), anchor="w")
-            c.create_text(qx + 150, y, text=job_text, fill=COLORS["primary_light"], font=("JetBrains Mono", 10), anchor="w")
-            c.create_text(qx + 300, y, text=frag_text, fill=COLORS["secondary"], font=("JetBrains Mono", 10), anchor="w")
+            yy = table_y + 28 + i * row_h
+            c.create_text(qx, yy, text=f"P{part['index']} · {part['size']}K", fill=COLORS["text_secondary"], font=("JetBrains Mono", 10), anchor="w")
+            c.create_text(qx + 150, yy, text=job_text, fill=COLORS["primary_light"], font=("JetBrains Mono", 10), anchor="w")
+            c.create_text(qx + 300, yy, text=frag_text, fill=COLORS["secondary"], font=("JetBrains Mono", 10), anchor="w")
+        if len(partitions) > 9:
+            c.create_text(qx, table_y + 28 + 9 * row_h, text=f"+{len(partitions)-9} more partitions", fill=COLORS["text_muted"], font=("Inter", 10), anchor="w")
 
     def _draw_memory_bar(self, blocks, x, y, w, h, title):
         c = self.memory_canvas
         total = sum(block["size"] for block in blocks) or 1
-        c.create_text(x, y - 20, text=title, fill=COLORS["text_primary"], font=("Inter", 13, "bold"), anchor="w")
+        c.create_text(x, y - 21, text=title, fill=COLORS["text_primary"], font=("Inter", 13, "bold"), anchor="w")
+        heights = self._scaled_heights([block["size"] for block in blocks], h, min_height=18)
         pos_y = y
-        for block in blocks:
-            bh = max(24, h * block["size"] / total)
+        for block, bh in zip(blocks, heights):
             if block["type"] == "os":
                 fill = COLORS["bg_highest"]
                 text = f"OS · {block['size']}K"
+                color = COLORS["text_primary"]
             elif block["type"] == "hole":
                 fill = COLORS["bg_elevated"]
                 text = f"HOLE · {block['size']}K"
+                color = COLORS["text_muted"]
             else:
                 fill = COLORS["primary"]
                 text = f"{block['name']} · {block['size']}K"
+                color = COLORS["text_primary"]
             c.create_rectangle(x, pos_y, x + w, pos_y + bh, fill=fill, outline=COLORS["border"], width=2)
-            color = COLORS["text_muted"] if block["type"] == "hole" else COLORS["text_primary"]
-            c.create_text(x + w/2, pos_y + bh/2, text=text, fill=color, font=("Inter", 10, "bold"))
-            c.create_text(x + w + 8, pos_y + 2, text=f"{block['start']}K", fill=COLORS["text_muted"], font=("JetBrains Mono", 9), anchor="nw")
+            if bh >= 16:
+                font_size = 9 if bh < 24 else 10
+                c.create_text(x + w/2, pos_y + bh/2, text=text, fill=color, font=("Inter", font_size, "bold"), width=w-8)
+            # Always show block boundary sizes. Use a smaller font for compressed
+            # blocks instead of hiding the labels.
+            boundary_font = 7 if bh < 18 else 8
+            c.create_text(x + w + 6, pos_y + 1, text=f"{block['start']}K", fill=COLORS["text_muted"], font=("JetBrains Mono", boundary_font), anchor="nw")
             pos_y += bh
-        c.create_text(x + w + 8, y + h - 10, text=f"{total}K", fill=COLORS["text_muted"], font=("JetBrains Mono", 9), anchor="nw")
+        c.create_text(x + w + 6, y + h - 10, text=f"{total}K", fill=COLORS["text_muted"], font=("JetBrains Mono", 8), anchor="nw")
+
+    def _draw_free_list_and_status(self, result, x, y):
+        c = self.memory_canvas
+        final = result["stages"][-1]
+        c.create_text(x, y, text="Free Space List", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        holes = [b for b in final["blocks"] if b["type"] == "hole"]
+        y += 30
+        if not holes:
+            c.create_text(x, y, text="No free holes", fill=COLORS["text_muted"], font=("Inter", 11), anchor="w")
+            y += 30
+        for i, hole in enumerate(holes[:5]):
+            row_y = y + i * 30
+            c.create_rectangle(x, row_y, x + 330, row_y + 24, fill=COLORS["bg_elevated"], outline=COLORS["border"])
+            c.create_text(x + 10, row_y + 12, text=f"Start: {hole['start']}K", fill=COLORS["text_secondary"], font=("JetBrains Mono", 9), anchor="w")
+            c.create_text(x + 165, row_y + 12, text=f"Size: {hole['size']}K", fill=COLORS["secondary"], font=("JetBrains Mono", 9, "bold"), anchor="w")
+        if len(holes) > 5:
+            c.create_text(x, y + 5 * 30, text=f"+{len(holes)-5} more holes", fill=COLORS["text_muted"], font=("Inter", 9), anchor="w")
+        y += min(len(holes), 5) * 30 + 18
+
+        c.create_text(x, y, text="Fragmentation Check", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        y += 28
+        msg = f"Total free: {result['free_total']}K   Largest: {result['largest_hole']}K   External frag: {result['external_fragmentation']}K"
+        c.create_rectangle(x, y, x + 420, y + 30, fill=COLORS["status_waiting_bg"] if result['external_fragmentation'] else COLORS["status_running_bg"], outline=COLORS["border"])
+        c.create_text(x + 10, y + 15, text=msg, fill=COLORS["text_secondary"], font=("JetBrains Mono", 9), anchor="w")
+        y += 48
+
+        # Show incoming jobs with final status so users can tell what happened to every incoming item.
+        incoming = result.get("incoming_status", [])
+        if incoming:
+            c.create_text(x, y, text="Incoming Jobs", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+            y += 26
+            for i, item in enumerate(incoming[:4]):
+                row_y = y + i * 28
+                ok = item["status"].lower().startswith("allocated")
+                bg = COLORS["status_running_bg"] if ok else COLORS["status_waiting_bg"]
+                c.create_rectangle(x, row_y, x + 420, row_y + 24, fill=bg, outline=COLORS["border"])
+                c.create_text(x + 10, row_y + 12, text=f"{item['name']}={item['size']}K", fill=COLORS["text_primary"], font=("JetBrains Mono", 9, "bold"), anchor="w")
+                c.create_text(x + 170, row_y + 12, text=item["status"], fill=COLORS["secondary"] if ok else COLORS["primary_light"], font=("Inter", 9, "bold"), anchor="w")
+            if len(incoming) > 4:
+                c.create_text(x, y + 4 * 28, text=f"+{len(incoming)-4} more incoming jobs", fill=COLORS["text_muted"], font=("Inter", 9), anchor="w")
 
     def _draw_mvt_map(self, result):
         stages = result["stages"]
-        if result["compaction"] and result["compaction_used"]:
-            before = next((s for s in stages if s["label"].startswith("Before Compaction")), stages[-2])
-            after = next((s for s in stages if s["label"] == "After Compaction"), stages[-1])
+
+        def pick_stage(starts_with=None, equals=None, fallback=None):
+            for stage in stages:
+                label = stage.get("label", "")
+                if equals is not None and label == equals:
+                    return stage
+                if starts_with is not None and label.startswith(starts_with):
+                    return stage
+            return fallback if fallback is not None else stages[-1]
+
+        c = self.memory_canvas
+        bar_y, bar_h, bar_w = 62, 300, 160
+        x1, x2, x3 = 45, 345, 645
+
+        # MVT is shown as a three-stage story. This avoids the old crowded
+        # waiting-queue overlay and makes No Compaction easier to compare:
+        # initial load -> release/reduced memory -> incoming/final allocation.
+        if result["compaction"]:
+            before = pick_stage(starts_with="Before Compaction", fallback=pick_stage(equals="After Release / Fragmented Memory"))
+            after = pick_stage(equals="After Compaction", fallback=before)
             final = stages[-1]
-            self._draw_memory_bar(before["blocks"], 55, 55, 180, 270, "Before Compaction")
-            self._draw_memory_bar(after["blocks"], 330, 55, 180, 270, "After Compaction")
-            self._draw_memory_bar(final["blocks"], 605, 55, 180, 270, "Final Allocation")
-            self.memory_canvas.create_text(275, 180, text="→", fill=COLORS["secondary"], font=("Inter", 28, "bold"))
-            self.memory_canvas.create_text(550, 180, text="→", fill=COLORS["secondary"], font=("Inter", 28, "bold"))
+            self._draw_memory_bar(before["blocks"], x1, bar_y, bar_w, bar_h, "Before Compaction")
+            self._draw_memory_bar(after["blocks"], x2, bar_y, bar_w, bar_h, "After Compaction")
+            self._draw_memory_bar(final["blocks"], x3, bar_y, bar_w, bar_h, "Final Allocation")
+
+            arrow_y = 38
+            c.create_line(x1 + bar_w + 55, arrow_y, x2 - 35, arrow_y, fill=COLORS["secondary"], width=2, arrow=tk.LAST)
+            c.create_text((x1 + bar_w + x2) / 2, arrow_y - 11, text="compact", fill=COLORS["secondary"], font=("Inter", 9, "bold"))
+            c.create_line(x2 + bar_w + 55, arrow_y, x3 - 35, arrow_y, fill=COLORS["secondary"], width=2, arrow=tk.LAST)
+            c.create_text((x2 + bar_w + x3) / 2, arrow_y - 11, text="allocate", fill=COLORS["secondary"], font=("Inter", 9, "bold"))
         else:
+            initial = pick_stage(equals="After Initial Allocation", fallback=stages[0])
+            reduced = pick_stage(equals="After Release / Fragmented Memory", fallback=initial)
             final = stages[-1]
-            self._draw_memory_bar(final["blocks"], 70, 55, 240, 270, "Final Memory Map")
-            x = 380
-            self.memory_canvas.create_text(x, 55, text="Free Space List", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
-            holes = [b for b in final["blocks"] if b["type"] == "hole"]
-            if not holes:
-                self.memory_canvas.create_text(x, 90, text="No free holes", fill=COLORS["text_muted"], font=("Inter", 11), anchor="w")
-            for i, hole in enumerate(holes):
-                y = 86 + i * 34
-                self.memory_canvas.create_rectangle(x, y, x + 340, y + 26, fill=COLORS["bg_elevated"], outline=COLORS["border"])
-                self.memory_canvas.create_text(x + 12, y + 13, text=f"Start: {hole['start']}K", fill=COLORS["text_secondary"], font=("JetBrains Mono", 10), anchor="w")
-                self.memory_canvas.create_text(x + 170, y + 13, text=f"Size: {hole['size']}K", fill=COLORS["secondary"], font=("JetBrains Mono", 10), anchor="w")
-            y = 235
-            self.memory_canvas.create_text(x, y, text="Fragmentation Check", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
-            y += 32
-            msg = f"Total free: {result['free_total']}K   Largest hole: {result['largest_hole']}K   External fragmentation: {result['external_fragmentation']}K"
-            self.memory_canvas.create_text(x, y, text=msg, fill=COLORS["text_secondary"], font=("JetBrains Mono", 10), anchor="w")
+            self._draw_memory_bar(initial["blocks"], x1, bar_y, bar_w, bar_h, "Initial Jobs")
+            self._draw_memory_bar(reduced["blocks"], x2, bar_y, bar_w, bar_h, "After Release")
+            self._draw_memory_bar(final["blocks"], x3, bar_y, bar_w, bar_h, "Incoming Jobs")
+
+            arrow_y = 38
+            c.create_line(x1 + bar_w + 55, arrow_y, x2 - 35, arrow_y, fill=COLORS["text_muted"], width=2, arrow=tk.LAST)
+            c.create_text((x1 + bar_w + x2) / 2, arrow_y - 11, text="release", fill=COLORS["text_muted"], font=("Inter", 9, "bold"))
+            c.create_line(x2 + bar_w + 55, arrow_y, x3 - 35, arrow_y, fill=COLORS["text_muted"], width=2, arrow=tk.LAST)
+            c.create_text((x2 + bar_w + x3) / 2, arrow_y - 11, text="allocate", fill=COLORS["text_muted"], font=("Inter", 9, "bold"))
+
+        # Keep all waiting information out of the visualization area. It is
+        # intentionally shown only in the Results Summary to prevent overlap.
+        holes = [b for b in stages[-1]["blocks"] if b["type"] == "hole"]
+        summary_y = 385
+        msg = f"Free: {result['free_total']}K   Largest: {result['largest_hole']}K   External Frag: {result['external_fragmentation']}K"
+        c.create_rectangle(45, summary_y, 945, summary_y + 30, fill=COLORS["status_waiting_bg"] if result['external_fragmentation'] else COLORS["status_running_bg"], outline=COLORS["border"])
+        c.create_text(58, summary_y + 15, text=msg, fill=COLORS["text_secondary"], font=("JetBrains Mono", 9), anchor="w")
+        c.create_text(935, summary_y + 15, text=f"Holes: {len(holes)}", fill=COLORS["secondary"], font=("JetBrains Mono", 9, "bold"), anchor="e")
 
     def _draw_paging_map(self, result):
         c = self.memory_canvas

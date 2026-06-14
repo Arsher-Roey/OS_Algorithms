@@ -175,6 +175,10 @@ def _compact_mvt(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return compacted
 
 
+def _hole_count(blocks: list[dict[str, Any]]) -> int:
+    return sum(1 for block in blocks if block["type"] == "hole")
+
+
 def simulate_mvt(
     total_memory: int,
     os_size: int,
@@ -196,38 +200,74 @@ def simulate_mvt(
     steps: list[str] = [f"Memory starts with OS = {os_size}K and one free hole = {total_memory - os_size}K."]
     stages: list[dict[str, Any]] = [{"label": "Initial Memory", "blocks": _clone_blocks(blocks)}]
     waiting: list[dict[str, Any]] = []
+    incoming_status: list[dict[str, Any]] = []
+    release_status: list[dict[str, Any]] = []
     compaction_used = False
 
+    # 1) Load the initial jobs in the selected policy order.
     for job in initial_jobs:
         blocks, ok, message = _allocate_mvt(blocks, job, policy)
         steps.append(message)
         if not ok:
-            waiting.append(job.copy())
+            waiting_job = job.copy()
+            waiting_job["phase"] = "initial"
+            waiting.append(waiting_job)
     stages.append({"label": "After Initial Allocation", "blocks": _clone_blocks(blocks)})
 
+    # 2) Release jobs to create holes. Report invalid release names instead of failing silently.
     if release_jobs:
+        before_names = {str(b.get("name", "")).upper() for b in blocks if b["type"] == "job"}
         blocks, released = _release_mvt(blocks, release_jobs)
+        released_set = {name.upper() for name in released}
+        for name in release_jobs:
+            clean = name.strip()
+            if not clean:
+                continue
+            release_status.append({"name": clean, "released": clean.upper() in released_set})
+        missing = [item["name"] for item in release_status if not item["released"]]
         if released:
-            steps.append("Released jobs: " + ", ".join(released) + ". Adjacent holes are merged.")
+            msg = "Released jobs: " + ", ".join(released) + ". Adjacent holes are merged."
+            if missing:
+                msg += " Not found: " + ", ".join(missing) + "."
+            steps.append(msg)
         else:
-            steps.append("No matching jobs were released.")
+            steps.append("No matching jobs were released." + (" Not found: " + ", ".join(missing) + "." if missing else ""))
         stages.append({"label": "After Release / Fragmented Memory", "blocks": _clone_blocks(blocks)})
 
+    # 3) In With Compaction mode, compaction is a real separate visual process.
+    #    It happens after releases whenever scattered holes exist, not only after an incoming failure.
+    if compaction and _hole_count(blocks) > 1:
+        stages.append({"label": "Before Compaction", "blocks": _clone_blocks(blocks)})
+        total_free_before = sum(block["size"] for block in blocks if block["type"] == "hole")
+        blocks = _compact_mvt(blocks)
+        compaction_used = True
+        steps.append(
+            f"Compaction moves allocated jobs together and merges scattered free spaces into one {total_free_before}K hole."
+        )
+        stages.append({"label": "After Compaction", "blocks": _clone_blocks(blocks)})
+
+    # 4) Allocate incoming jobs. If compaction was not yet used and a fragmented failure occurs,
+    #    compact on demand and retry.
     for job in incoming_jobs:
         blocks, ok, message = _allocate_mvt(blocks, job, policy)
         steps.append(message)
+        status = {"name": str(job["name"]), "size": int(job["size"]), "status": "Allocated" if ok else "Waiting"}
         if not ok and compaction:
             total_free = sum(block["size"] for block in blocks if block["type"] == "hole")
-            if total_free >= int(job["size"]):
+            if total_free >= int(job["size"]) and _hole_count(blocks) > 1:
                 stages.append({"label": f"Before Compaction for {job['name']}", "blocks": _clone_blocks(blocks)})
                 blocks = _compact_mvt(blocks)
                 compaction_used = True
-                steps.append(f"Compaction moves allocated jobs together and merges free space into one {total_free}K hole.")
+                steps.append(f"Compaction merges free space into one {total_free}K hole, then retries {job['name']}.")
                 stages.append({"label": "After Compaction", "blocks": _clone_blocks(blocks)})
                 blocks, ok, message = _allocate_mvt(blocks, job, policy)
                 steps.append("Retry after compaction: " + message)
+                status["status"] = "Allocated after compaction" if ok else "Waiting"
         if not ok:
-            waiting.append(job.copy())
+            waiting_job = job.copy()
+            waiting_job["phase"] = "incoming"
+            waiting.append(waiting_job)
+        incoming_status.append(status)
 
     stages.append({"label": "Final Memory Map", "blocks": _clone_blocks(blocks)})
     free_total = sum(block["size"] for block in blocks if block["type"] == "hole")
@@ -241,12 +281,13 @@ def simulate_mvt(
         "blocks": blocks,
         "stages": stages,
         "waiting": waiting,
+        "incoming_status": incoming_status,
+        "release_status": release_status,
         "steps": steps,
         "free_total": free_total,
         "largest_hole": largest_hole,
         "external_fragmentation": external_frag,
     }
-
 
 def simulate_paging(total_memory: int, os_size: int, page_size: int, job_size: int, logical_address: int) -> dict[str, Any]:
     total_memory = int(total_memory)
