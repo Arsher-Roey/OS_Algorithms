@@ -11,6 +11,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import algorithms
 from algorithms.disk_scheduling import DISK_REGISTRY, DIRECTION_ALGORITHMS
+from algorithms import memory_management as memalgo
 
 
 COLORS = {
@@ -940,6 +941,758 @@ class CPUSchedulingPage(ctk.CTkFrame):
             self.update_metric("avg_wait", "N/A")
             self.update_metric("avg_turn", "N/A")
             self.update_metric("cpu_util", "N/A")
+
+
+
+class MemoryManagementPage(ctk.CTkFrame):
+
+    def __init__(self, master, **kwargs):
+        super().__init__(master, fg_color=COLORS["bg"], corner_radius=0, **kwargs)
+
+        self.scheme_var = ctk.StringVar(value="MFT")
+        self.mft_policy_var = ctk.StringVar(value="Best Available Fit")
+        self.mvt_policy_var = ctk.StringVar(value="First Fit")
+        self.compaction_var = ctk.StringVar(value="No Compaction")
+        self.paging_view_var = ctk.StringVar(value="Allocation View")
+
+        self.control_widgets = []
+        self.last_result = None
+
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=0)
+        self.rowconfigure(0, weight=1)
+
+        self._build_main_area()
+        self._build_parameters_panel()
+        self._load_sample_values()
+        self._draw_empty_state()
+
+    # ---------- layout ----------
+    def _build_main_area(self):
+        main = ctk.CTkScrollableFrame(
+            self,
+            fg_color="transparent",
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["primary"],
+        )
+        main.grid(row=0, column=0, sticky="nsew", padx=(32, 16), pady=24)
+        main.columnconfigure(0, weight=1)
+        self.main_area = main
+
+        ctk.CTkLabel(
+            main,
+            text="Memory Management Module",
+            font=FONTS["headline_lg"],
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x")
+
+        ctk.CTkLabel(
+            main,
+            text="Visualize MFT, MVT, and Paging allocation processes with policy-based memory maps.",
+            font=FONTS["body_md"],
+            text_color=COLORS["text_secondary"],
+            anchor="w",
+        ).pack(fill="x", pady=(4, 18))
+
+        self.summary_row = ctk.CTkFrame(main, fg_color="transparent")
+        self.summary_row.pack(fill="x", pady=(0, 14))
+        self._make_summary_card("Scheme", "MFT", "scheme")
+        self._make_summary_card("Policy", "Best Available Fit", "policy")
+        self._make_summary_card("Mode", "Fixed Partitions", "mode")
+
+        self.visual_card = ctk.CTkFrame(
+            main,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self.visual_card.pack(fill="both", expand=True, pady=(0, 14))
+
+        header = ctk.CTkFrame(self.visual_card, fg_color="transparent")
+        header.pack(fill="x", padx=18, pady=(16, 8))
+        ctk.CTkLabel(
+            header,
+            text="Memory Map Visualization",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+        ).pack(side="left")
+        self.visual_hint = ctk.CTkLabel(
+            header,
+            text="Choose a scheme and run a simulation",
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_muted"],
+        )
+        self.visual_hint.pack(side="right")
+
+        self.canvas_holder = ctk.CTkFrame(self.visual_card, fg_color=COLORS["bg_card"], corner_radius=12)
+        self.canvas_holder.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+        self.memory_canvas = tk.Canvas(
+            self.canvas_holder,
+            bg=COLORS["bg_card"],
+            highlightthickness=0,
+            height=370,
+        )
+        self.memory_canvas.pack(fill="both", expand=True, padx=8, pady=8)
+
+        bottom_grid = ctk.CTkFrame(main, fg_color="transparent")
+        bottom_grid.pack(fill="both", expand=True)
+        bottom_grid.columnconfigure(0, weight=2)
+        bottom_grid.columnconfigure(1, weight=1)
+
+        self.log_card = ctk.CTkFrame(
+            bottom_grid,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self.log_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        ctk.CTkLabel(
+            self.log_card,
+            text="Process Steps",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(14, 6))
+        self.step_output = ctk.CTkTextbox(
+            self.log_card,
+            height=190,
+            fg_color=COLORS["bg_card"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=10,
+            font=FONTS["data_sm"],
+            text_color=COLORS["text_secondary"],
+            wrap="word",
+        )
+        self.step_output.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        self.step_output.configure(state="disabled")
+
+        self.result_card = ctk.CTkFrame(
+            bottom_grid,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self.result_card.grid(row=0, column=1, sticky="nsew")
+        ctk.CTkLabel(
+            self.result_card,
+            text="Results",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(14, 6))
+        self.results_box = ctk.CTkFrame(self.result_card, fg_color="transparent")
+        self.results_box.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+
+    def _make_summary_card(self, label, value, key):
+        card = ctk.CTkFrame(
+            self.summary_row,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        card.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        ctk.CTkLabel(
+            card,
+            text=label.upper(),
+            font=FONTS["label_caps"],
+            text_color=COLORS["text_muted"],
+        ).pack(anchor="w", padx=14, pady=(10, 0))
+        value_label = ctk.CTkLabel(
+            card,
+            text=value,
+            font=FONTS["metric_val"],
+            text_color=COLORS["primary_light"],
+            anchor="w",
+        )
+        value_label.pack(fill="x", padx=14, pady=(3, 10))
+        setattr(self, f"summary_{key}", value_label)
+
+    def _build_parameters_panel(self):
+        self.params = ctk.CTkScrollableFrame(
+            self,
+            width=260,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=0,
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["primary"],
+        )
+        self.params.grid(row=0, column=1, sticky="nsew")
+        self._rebuild_parameters()
+
+    def _rebuild_parameters(self, *_):
+        for widget in self.params.winfo_children():
+            widget.destroy()
+
+        ctk.CTkLabel(
+            self.params,
+            text="☰ Parameters",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x", padx=20, pady=(24, 22))
+
+        self._section_label(self.params, "MEMORY SCHEME")
+        ctk.CTkOptionMenu(
+            self.params,
+            variable=self.scheme_var,
+            values=["MFT", "MVT", "Paging"],
+            command=self._on_scheme_changed,
+            fg_color=COLORS["bg_elevated"],
+            button_color=COLORS["primary"],
+            button_hover_color=COLORS["primary_light"],
+            dropdown_fg_color=COLORS["bg_elevated"],
+            dropdown_hover_color=COLORS["bg_highest"],
+            dropdown_text_color=COLORS["text_primary"],
+            text_color=COLORS["text_primary"],
+        ).pack(fill="x", padx=20, pady=(0, 18))
+
+        scheme = self.scheme_var.get()
+        if scheme == "MFT":
+            self._build_mft_controls()
+        elif scheme == "MVT":
+            self._build_mvt_controls()
+        else:
+            self._build_paging_controls()
+
+        self._divider(self.params)
+        ctk.CTkButton(
+            self.params,
+            text="▶  Run Simulation",
+            font=FONTS["button"],
+            height=44,
+            corner_radius=8,
+            fg_color=COLORS["primary"],
+            hover_color=COLORS["primary_light"],
+            command=self._run_simulation,
+        ).pack(fill="x", padx=20, pady=(16, 10))
+
+        ctk.CTkButton(
+            self.params,
+            text="↻  Load Sample",
+            font=FONTS["button"],
+            height=40,
+            corner_radius=8,
+            fg_color=COLORS["bg_elevated"],
+            hover_color=COLORS["bg_highest"],
+            command=self._load_sample_values,
+        ).pack(fill="x", padx=20, pady=(0, 10))
+
+        ctk.CTkButton(
+            self.params,
+            text="✕  Clear Output",
+            font=FONTS["button"],
+            height=40,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLORS["border"],
+            hover_color=COLORS["bg_elevated"],
+            command=self._draw_empty_state,
+        ).pack(fill="x", padx=20, pady=(0, 24))
+
+    def _build_mft_controls(self):
+        self._section_label(self.params, "ALLOCATION POLICY")
+        ctk.CTkOptionMenu(
+            self.params,
+            variable=self.mft_policy_var,
+            values=["Best Fit", "First Fit", "Best Available Fit"],
+            fg_color=COLORS["bg_elevated"],
+            button_color=COLORS["primary"],
+            dropdown_fg_color=COLORS["bg_elevated"],
+            dropdown_hover_color=COLORS["bg_highest"],
+            text_color=COLORS["text_primary"],
+            dropdown_text_color=COLORS["text_primary"],
+        ).pack(fill="x", padx=20, pady=(0, 18))
+
+        self._section_label(self.params, "FIXED PARTITIONS")
+        self.mft_partitions_entry = self._entry(self.params, "10, 6, 4, 4")
+        self._hint(self.params, "Example: 10, 6, 4, 4")
+
+        self._section_label(self.params, "JOB QUEUE")
+        self.mft_jobs_entry = self._entry(self.params, "A=2, B=3, C=4, D=5, E=6")
+        self._hint(self.params, "Example: A=2, B=3, C=4")
+
+    def _build_mvt_controls(self):
+        self._section_label(self.params, "ALLOCATION POLICY")
+        ctk.CTkOptionMenu(
+            self.params,
+            variable=self.mvt_policy_var,
+            values=["First Fit", "Best Fit", "Worst Fit"],
+            fg_color=COLORS["bg_elevated"],
+            button_color=COLORS["primary"],
+            dropdown_fg_color=COLORS["bg_elevated"],
+            dropdown_hover_color=COLORS["bg_highest"],
+            text_color=COLORS["text_primary"],
+            dropdown_text_color=COLORS["text_primary"],
+        ).pack(fill="x", padx=20, pady=(0, 18))
+
+        self._section_label(self.params, "COMPACTION MODE")
+        ctk.CTkOptionMenu(
+            self.params,
+            variable=self.compaction_var,
+            values=["No Compaction", "With Compaction"],
+            fg_color=COLORS["bg_elevated"],
+            button_color=COLORS["primary"],
+            dropdown_fg_color=COLORS["bg_elevated"],
+            dropdown_hover_color=COLORS["bg_highest"],
+            text_color=COLORS["text_primary"],
+            dropdown_text_color=COLORS["text_primary"],
+        ).pack(fill="x", padx=20, pady=(0, 18))
+
+        self._section_label(self.params, "MEMORY SETTINGS")
+        row = ctk.CTkFrame(self.params, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=(0, 12))
+        self.mvt_total_entry = self._small_entry(row, "256")
+        self.mvt_os_entry = self._small_entry(row, "40")
+        ctk.CTkLabel(row, text="Total", font=FONTS["body_sm"], text_color=COLORS["text_muted"]).grid(row=1, column=0, sticky="w", pady=(3,0))
+        ctk.CTkLabel(row, text="OS", font=FONTS["body_sm"], text_color=COLORS["text_muted"]).grid(row=1, column=1, sticky="w", pady=(3,0), padx=(8,0))
+
+        self._section_label(self.params, "INITIAL JOBS")
+        self.mvt_initial_entry = self._entry(self.params, "A=70, B=40, C=60, D=30")
+        self._section_label(self.params, "RELEASE JOBS")
+        self.mvt_release_entry = self._entry(self.params, "B, D")
+        self._hint(self.params, "These jobs finish first, creating scattered holes.")
+        self._section_label(self.params, "INCOMING JOBS")
+        self.mvt_incoming_entry = self._entry(self.params, "E=65")
+        self._hint(self.params, "Use this to see the difference between compaction on/off.")
+
+    def _build_paging_controls(self):
+        self._section_label(self.params, "PAGING VIEW")
+        ctk.CTkOptionMenu(
+            self.params,
+            variable=self.paging_view_var,
+            values=["Allocation View", "Address Translation View"],
+            fg_color=COLORS["bg_elevated"],
+            button_color=COLORS["primary"],
+            dropdown_fg_color=COLORS["bg_elevated"],
+            dropdown_hover_color=COLORS["bg_highest"],
+            text_color=COLORS["text_primary"],
+            dropdown_text_color=COLORS["text_primary"],
+        ).pack(fill="x", padx=20, pady=(0, 18))
+
+        self._section_label(self.params, "MEMORY SETTINGS")
+        row1 = ctk.CTkFrame(self.params, fg_color="transparent")
+        row1.pack(fill="x", padx=20, pady=(0, 12))
+        self.paging_total_entry = self._small_entry(row1, "256")
+        self.paging_os_entry = self._small_entry(row1, "48")
+        ctk.CTkLabel(row1, text="Total", font=FONTS["body_sm"], text_color=COLORS["text_muted"]).grid(row=1, column=0, sticky="w", pady=(3,0))
+        ctk.CTkLabel(row1, text="OS", font=FONTS["body_sm"], text_color=COLORS["text_muted"]).grid(row=1, column=1, sticky="w", pady=(3,0), padx=(8,0))
+
+        row2 = ctk.CTkFrame(self.params, fg_color="transparent")
+        row2.pack(fill="x", padx=20, pady=(0, 12))
+        self.paging_page_entry = self._small_entry(row2, "16")
+        self.paging_job_entry = self._small_entry(row2, "30")
+        ctk.CTkLabel(row2, text="Page Size", font=FONTS["body_sm"], text_color=COLORS["text_muted"]).grid(row=1, column=0, sticky="w", pady=(3,0))
+        ctk.CTkLabel(row2, text="Job Size", font=FONTS["body_sm"], text_color=COLORS["text_muted"]).grid(row=1, column=1, sticky="w", pady=(3,0), padx=(8,0))
+
+        self._section_label(self.params, "LOGICAL ADDRESS")
+        self.paging_la_entry = self._entry(self.params, "10")
+        self._hint(self.params, "Uses p = LA / page size, d = LA % page size.")
+
+    # ---------- parameter helpers ----------
+    def _section_label(self, parent, text):
+        ctk.CTkLabel(
+            parent,
+            text=text,
+            font=FONTS["label_caps"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
+        ).pack(fill="x", padx=20, pady=(10, 7))
+
+    def _hint(self, parent, text):
+        ctk.CTkLabel(
+            parent,
+            text=text,
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
+            wraplength=210,
+            justify="left",
+        ).pack(fill="x", padx=20, pady=(0, 10))
+
+    def _entry(self, parent, placeholder):
+        entry = ctk.CTkEntry(
+            parent,
+            height=34,
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            placeholder_text=placeholder,
+            text_color=COLORS["text_primary"],
+        )
+        entry.pack(fill="x", padx=20, pady=(0, 8))
+        entry.insert(0, placeholder)
+        return entry
+
+    def _small_entry(self, parent, text):
+        parent.columnconfigure(0, weight=1)
+        parent.columnconfigure(1, weight=1)
+        entry = ctk.CTkEntry(
+            parent,
+            height=34,
+            width=92,
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+        )
+        col = len(parent.grid_slaves(row=0))
+        entry.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 8, 0))
+        entry.insert(0, text)
+        return entry
+
+    def _divider(self, parent):
+        ctk.CTkFrame(parent, fg_color=COLORS["border"], height=1).pack(fill="x", padx=20, pady=(12, 4))
+
+    # ---------- parsing ----------
+    def _parse_sizes(self, text: str) -> list[int]:
+        values = []
+        for raw in text.replace(";", ",").split(","):
+            item = raw.strip().upper().replace("K", "")
+            if not item:
+                continue
+            values.append(int(item))
+        return values
+
+    def _parse_jobs(self, text: str, prefix="J") -> list[dict]:
+        jobs = []
+        auto = 1
+        for raw in text.replace(";", ",").split(","):
+            item = raw.strip().replace("K", "").replace("k", "")
+            if not item:
+                continue
+            if "=" in item:
+                name, size = item.split("=", 1)
+                name = name.strip() or f"{prefix}{auto}"
+            else:
+                name, size = f"{prefix}{auto}", item
+            jobs.append({"name": name.strip(), "size": int(size.strip())})
+            auto += 1
+        return jobs
+
+    def _parse_names(self, text: str) -> list[str]:
+        return [item.strip() for item in text.replace(";", ",").split(",") if item.strip()]
+
+    # ---------- actions ----------
+    def _on_scheme_changed(self, value=None):
+        self._rebuild_parameters()
+        self._load_sample_values()
+        self._draw_empty_state()
+
+    def _load_sample_values(self):
+        scheme = self.scheme_var.get()
+        if scheme == "MFT" and hasattr(self, "mft_partitions_entry"):
+            self._set_entry(self.mft_partitions_entry, "10, 6, 4, 4")
+            self._set_entry(self.mft_jobs_entry, "A=2, B=3, C=4, D=5, E=6")
+        elif scheme == "MVT" and hasattr(self, "mvt_total_entry"):
+            self._set_entry(self.mvt_total_entry, "256")
+            self._set_entry(self.mvt_os_entry, "40")
+            self._set_entry(self.mvt_initial_entry, "A=70, B=40, C=60, D=30")
+            self._set_entry(self.mvt_release_entry, "B, D")
+            self._set_entry(self.mvt_incoming_entry, "E=65")
+        elif scheme == "Paging" and hasattr(self, "paging_total_entry"):
+            self._set_entry(self.paging_total_entry, "256")
+            self._set_entry(self.paging_os_entry, "48")
+            self._set_entry(self.paging_page_entry, "16")
+            self._set_entry(self.paging_job_entry, "30")
+            self._set_entry(self.paging_la_entry, "10")
+
+    def _set_entry(self, entry, text):
+        entry.delete(0, "end")
+        entry.insert(0, text)
+
+    def _run_simulation(self):
+        try:
+            scheme = self.scheme_var.get()
+            if scheme == "MFT":
+                partitions = self._parse_sizes(self.mft_partitions_entry.get())
+                jobs = self._parse_jobs(self.mft_jobs_entry.get())
+                result = memalgo.simulate_mft(partitions, jobs, self.mft_policy_var.get())
+                self._render_mft(result)
+            elif scheme == "MVT":
+                total = int(self.mvt_total_entry.get())
+                os_size = int(self.mvt_os_entry.get())
+                initial = self._parse_jobs(self.mvt_initial_entry.get())
+                release = self._parse_names(self.mvt_release_entry.get())
+                incoming = self._parse_jobs(self.mvt_incoming_entry.get())
+                result = memalgo.simulate_mvt(
+                    total,
+                    os_size,
+                    initial,
+                    release,
+                    incoming,
+                    self.mvt_policy_var.get(),
+                    self.compaction_var.get() == "With Compaction",
+                )
+                self._render_mvt(result)
+            else:
+                result = memalgo.simulate_paging(
+                    int(self.paging_total_entry.get()),
+                    int(self.paging_os_entry.get()),
+                    int(self.paging_page_entry.get()),
+                    int(self.paging_job_entry.get()),
+                    int(self.paging_la_entry.get()),
+                )
+                self._render_paging(result)
+        except Exception as exc:
+            self._show_error(str(exc))
+
+    def _draw_empty_state(self):
+        self.memory_canvas.delete("all")
+        self.memory_canvas.create_text(
+            520, 160,
+            text="Choose MFT, MVT, or Paging, then click Run Simulation.",
+            fill=COLORS["text_muted"],
+            font=("Inter", 13),
+            anchor="center",
+        )
+        self.visual_hint.configure(text="Ready")
+        self._set_steps("Simulation output will appear here.")
+        self._set_results([("Status", "Waiting"), ("Scheme", self.scheme_var.get())])
+        self._update_summary(self.scheme_var.get(), "Not run", "Visualization")
+
+    def _show_error(self, message):
+        self.memory_canvas.delete("all")
+        self.memory_canvas.create_text(520, 160, text="Input Error", fill=COLORS["status_terminated_fg"], font=("Inter", 18, "bold"))
+        self.memory_canvas.create_text(520, 190, text=message, fill=COLORS["text_secondary"], font=("Inter", 12), width=760)
+        self._set_steps("Please check your input values.\n\n" + message)
+        self._set_results([("Status", "Error")])
+
+    # ---------- renderers ----------
+    def _render_mft(self, result):
+        self.visual_hint.configure(text="Fixed partitions · one job per region")
+        self._update_summary("MFT", result["policy"], "Fixed Partitions")
+        self.memory_canvas.delete("all")
+        self._draw_mft_map(result)
+        self._set_steps("\n".join(f"{i+1}. {step}" for i, step in enumerate(result["steps"])))
+        waiting = ", ".join(f"{j['name']}({j['size']}K)" for j in result["waiting"]) or "None"
+        allocated = sum(1 for p in result["partitions"] if p["job"])
+        self._set_results([
+            ("Allocated", f"{allocated}/{len(result['partitions'])}"),
+            ("Waiting", waiting),
+            ("Internal Frag", f"{result['total_internal']}K"),
+        ])
+
+    def _render_mvt(self, result):
+        mode = "With Compaction" if result["compaction"] else "No Compaction"
+        self.visual_hint.configure(text="Variable partitions · holes and free-space list")
+        self._update_summary("MVT", result["policy"], mode)
+        self.memory_canvas.delete("all")
+        self._draw_mvt_map(result)
+        self._set_steps("\n".join(f"{i+1}. {step}" for i, step in enumerate(result["steps"])))
+        waiting = ", ".join(f"{j['name']}({j['size']}K)" for j in result["waiting"]) or "None"
+        self._set_results([
+            ("Free Total", f"{result['free_total']}K"),
+            ("Largest Hole", f"{result['largest_hole']}K"),
+            ("External Frag", f"{result['external_fragmentation']}K"),
+            ("Compaction Used", "Yes" if result["compaction_used"] else "No"),
+            ("Waiting", waiting),
+        ])
+
+    def _render_paging(self, result):
+        self.visual_hint.configure(text="Pages, frames, page table, and address translation")
+        self._update_summary("Paging", self.paging_view_var.get(), f"Page Size {result['page_size']}K")
+        self.memory_canvas.delete("all")
+        self._draw_paging_map(result)
+        self._set_steps("\n".join(f"{i+1}. {step}" for i, step in enumerate(result["steps"])))
+        address = result.get("address_result")
+        physical = f"{address['pa']}K" if address else "Invalid"
+        self._set_results([
+            ("Frames", str(result["total_frames"])),
+            ("Pages Needed", str(result["pages_needed"])),
+            ("Internal Frag", f"{result['internal_fragmentation']}K"),
+            ("Physical Addr", physical),
+        ])
+
+    def _update_summary(self, scheme, policy, mode):
+        self.summary_scheme.configure(text=scheme)
+        self.summary_policy.configure(text=policy)
+        self.summary_mode.configure(text=mode)
+
+    def _set_steps(self, text):
+        self.step_output.configure(state="normal")
+        self.step_output.delete("1.0", "end")
+        self.step_output.insert("1.0", text)
+        self.step_output.configure(state="disabled")
+
+    def _set_results(self, rows):
+        for widget in self.results_box.winfo_children():
+            widget.destroy()
+        for label, value in rows:
+            row = ctk.CTkFrame(self.results_box, fg_color=COLORS["bg_card"], corner_radius=8)
+            row.pack(fill="x", pady=(0, 8))
+            ctk.CTkLabel(row, text=label, font=FONTS["body_sm"], text_color=COLORS["text_secondary"]).pack(side="left", padx=10, pady=9)
+            ctk.CTkLabel(row, text=str(value), font=FONTS["metric_val"], text_color=COLORS["secondary"]).pack(side="right", padx=10, pady=9)
+
+    # ---------- canvas drawing helpers ----------
+    def _draw_rounded_rect(self, x1, y1, x2, y2, fill, outline=None, width=1):
+        # Canvas rounded rectangle approximation using normal rectangle for compatibility.
+        self.memory_canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline or COLORS["border"], width=width)
+
+    def _draw_mft_map(self, result):
+        c = self.memory_canvas
+        partitions = result["partitions"]
+        total_user = sum(p["size"] for p in partitions) or 1
+        bar_x, bar_y, bar_w, bar_h = 70, 40, 260, 290
+        os_h = 40
+        user_h = bar_h - os_h
+
+        c.create_text(bar_x, 18, text="Fixed Partition Memory", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        c.create_rectangle(bar_x, bar_y + user_h, bar_x + bar_w, bar_y + bar_h, fill=COLORS["bg_highest"], outline=COLORS["border"])
+        c.create_text(bar_x + bar_w/2, bar_y + user_h + os_h/2, text="OS", fill=COLORS["text_primary"], font=("Inter", 12, "bold"))
+
+        y = bar_y + user_h
+        for part in partitions:
+            h = max(34, user_h * part["size"] / total_user)
+            y -= h
+            job = part["job"]
+            base_fill = COLORS["status_waiting_bg"] if job else COLORS["bg_elevated"]
+            c.create_rectangle(bar_x, y, bar_x + bar_w, y + h, fill=base_fill, outline=COLORS["border"], width=2)
+            c.create_text(bar_x + 10, y + 15, text=f"Partition {part['index']} · {part['size']}K", fill=COLORS["text_secondary"], font=("Inter", 10), anchor="w")
+            if job:
+                frag = int(part["fragment"])
+                used_ratio = job["size"] / part["size"] if part["size"] else 1
+                used_h = max(18, h * used_ratio)
+                c.create_rectangle(bar_x + 12, y + h - used_h - 6, bar_x + bar_w - 12, y + h - 6, fill=COLORS["primary"], outline="")
+                c.create_text(bar_x + bar_w/2, y + h - used_h/2 - 6, text=f"{job['name']} = {job['size']}K", fill="#ffffff", font=("Inter", 11, "bold"))
+                if frag > 0:
+                    c.create_text(bar_x + bar_w - 12, y + 30, text=f"unused {frag}K", fill=COLORS["secondary"], font=("Inter", 10), anchor="e")
+            else:
+                c.create_text(bar_x + bar_w/2, y + h/2 + 8, text="Free", fill=COLORS["text_muted"], font=("Inter", 11))
+
+        qx = 390
+        c.create_text(qx, 42, text="Waiting Queue", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        waiting = result["waiting"]
+        if not waiting:
+            c.create_rectangle(qx, 66, qx + 450, 116, fill=COLORS["status_running_bg"], outline=COLORS["border"])
+            c.create_text(qx + 225, 91, text="All possible jobs were allocated", fill=COLORS["secondary"], font=("Inter", 12, "bold"))
+        else:
+            for i, job in enumerate(waiting):
+                x = qx + (i % 4) * 110
+                y = 70 + (i // 4) * 62
+                c.create_rectangle(x, y, x + 96, y + 44, fill=COLORS["bg_elevated"], outline=COLORS["border"])
+                c.create_text(x + 48, y + 15, text=job["name"], fill=COLORS["text_primary"], font=("Inter", 11, "bold"))
+                c.create_text(x + 48, y + 31, text=f"{job['size']}K", fill=COLORS["text_muted"], font=("Inter", 10))
+
+        c.create_text(qx, 170, text="Allocated Partitions", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        for i, part in enumerate(partitions):
+            job_text = f"{part['job']['name']} ({part['job']['size']}K)" if part["job"] else "Free"
+            frag_text = f"Frag: {part['fragment']}K" if part["job"] else ""
+            y = 198 + i * 28
+            c.create_text(qx, y, text=f"P{part['index']} · {part['size']}K", fill=COLORS["text_secondary"], font=("JetBrains Mono", 10), anchor="w")
+            c.create_text(qx + 150, y, text=job_text, fill=COLORS["primary_light"], font=("JetBrains Mono", 10), anchor="w")
+            c.create_text(qx + 300, y, text=frag_text, fill=COLORS["secondary"], font=("JetBrains Mono", 10), anchor="w")
+
+    def _draw_memory_bar(self, blocks, x, y, w, h, title):
+        c = self.memory_canvas
+        total = sum(block["size"] for block in blocks) or 1
+        c.create_text(x, y - 20, text=title, fill=COLORS["text_primary"], font=("Inter", 13, "bold"), anchor="w")
+        pos_y = y
+        for block in blocks:
+            bh = max(24, h * block["size"] / total)
+            if block["type"] == "os":
+                fill = COLORS["bg_highest"]
+                text = f"OS · {block['size']}K"
+            elif block["type"] == "hole":
+                fill = COLORS["bg_elevated"]
+                text = f"HOLE · {block['size']}K"
+            else:
+                fill = COLORS["primary"]
+                text = f"{block['name']} · {block['size']}K"
+            c.create_rectangle(x, pos_y, x + w, pos_y + bh, fill=fill, outline=COLORS["border"], width=2)
+            color = COLORS["text_muted"] if block["type"] == "hole" else COLORS["text_primary"]
+            c.create_text(x + w/2, pos_y + bh/2, text=text, fill=color, font=("Inter", 10, "bold"))
+            c.create_text(x + w + 8, pos_y + 2, text=f"{block['start']}K", fill=COLORS["text_muted"], font=("JetBrains Mono", 9), anchor="nw")
+            pos_y += bh
+        c.create_text(x + w + 8, y + h - 10, text=f"{total}K", fill=COLORS["text_muted"], font=("JetBrains Mono", 9), anchor="nw")
+
+    def _draw_mvt_map(self, result):
+        stages = result["stages"]
+        if result["compaction"] and result["compaction_used"]:
+            before = next((s for s in stages if s["label"].startswith("Before Compaction")), stages[-2])
+            after = next((s for s in stages if s["label"] == "After Compaction"), stages[-1])
+            final = stages[-1]
+            self._draw_memory_bar(before["blocks"], 55, 55, 180, 270, "Before Compaction")
+            self._draw_memory_bar(after["blocks"], 330, 55, 180, 270, "After Compaction")
+            self._draw_memory_bar(final["blocks"], 605, 55, 180, 270, "Final Allocation")
+            self.memory_canvas.create_text(275, 180, text="→", fill=COLORS["secondary"], font=("Inter", 28, "bold"))
+            self.memory_canvas.create_text(550, 180, text="→", fill=COLORS["secondary"], font=("Inter", 28, "bold"))
+        else:
+            final = stages[-1]
+            self._draw_memory_bar(final["blocks"], 70, 55, 240, 270, "Final Memory Map")
+            x = 380
+            self.memory_canvas.create_text(x, 55, text="Free Space List", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+            holes = [b for b in final["blocks"] if b["type"] == "hole"]
+            if not holes:
+                self.memory_canvas.create_text(x, 90, text="No free holes", fill=COLORS["text_muted"], font=("Inter", 11), anchor="w")
+            for i, hole in enumerate(holes):
+                y = 86 + i * 34
+                self.memory_canvas.create_rectangle(x, y, x + 340, y + 26, fill=COLORS["bg_elevated"], outline=COLORS["border"])
+                self.memory_canvas.create_text(x + 12, y + 13, text=f"Start: {hole['start']}K", fill=COLORS["text_secondary"], font=("JetBrains Mono", 10), anchor="w")
+                self.memory_canvas.create_text(x + 170, y + 13, text=f"Size: {hole['size']}K", fill=COLORS["secondary"], font=("JetBrains Mono", 10), anchor="w")
+            y = 235
+            self.memory_canvas.create_text(x, y, text="Fragmentation Check", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+            y += 32
+            msg = f"Total free: {result['free_total']}K   Largest hole: {result['largest_hole']}K   External fragmentation: {result['external_fragmentation']}K"
+            self.memory_canvas.create_text(x, y, text=msg, fill=COLORS["text_secondary"], font=("JetBrains Mono", 10), anchor="w")
+
+    def _draw_paging_map(self, result):
+        c = self.memory_canvas
+        page_size = result["page_size"]
+        pages = result["pages_needed"]
+        address = result.get("address_result") if self.paging_view_var.get() == "Address Translation View" else None
+
+        # Logical pages
+        lx, ly, bw, bh = 60, 70, 130, 36
+        c.create_text(lx, 42, text="Logical Pages", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        for p in range(pages):
+            y = ly + p * (bh + 6)
+            fill = COLORS["secondary_dark"] if address and p == address["p"] else COLORS["bg_elevated"]
+            c.create_rectangle(lx, y, lx + bw, y + bh, fill=fill, outline=COLORS["border"], width=2)
+            c.create_text(lx + bw/2, y + bh/2, text=f"Page {p}", fill=COLORS["text_primary"], font=("Inter", 11, "bold"))
+
+        # Page table
+        tx = 285
+        c.create_text(tx, 42, text="Page Table", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        c.create_rectangle(tx, 70, tx + 210, 100, fill=COLORS["bg_highest"], outline=COLORS["border"])
+        c.create_text(tx + 55, 85, text="Page", fill=COLORS["text_secondary"], font=("Inter", 10, "bold"))
+        c.create_text(tx + 155, 85, text="Frame", fill=COLORS["text_secondary"], font=("Inter", 10, "bold"))
+        for i, (page, frame) in enumerate(result["page_table"].items()):
+            y = 100 + i * 30
+            fill = COLORS["status_running_bg"] if address and page == address["p"] else COLORS["bg_card"]
+            c.create_rectangle(tx, y, tx + 210, y + 30, fill=fill, outline=COLORS["border"])
+            c.create_text(tx + 55, y + 15, text=str(page), fill=COLORS["text_primary"], font=("JetBrains Mono", 10))
+            c.create_text(tx + 155, y + 15, text=str(frame), fill=COLORS["primary_light"], font=("JetBrains Mono", 10, "bold"))
+
+        # Physical frames
+        fx, fy, fw = 610, 40, 170
+        c.create_text(fx, 20, text="Physical Frames", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+        total_frames = result["total_frames"]
+        frame_h = min(25, 310 / max(1, total_frames))
+        for item in result["frames"]:
+            frame = item["frame"]
+            y = fy + frame * frame_h
+            if item["type"] == "os":
+                fill = COLORS["bg_highest"]
+            elif item["type"] == "page":
+                fill = COLORS["secondary_dark"] if address and frame == address["f"] else COLORS["primary"]
+            else:
+                fill = COLORS["bg_elevated"]
+            c.create_rectangle(fx, y, fx + fw, y + frame_h, fill=fill, outline=COLORS["border"])
+            c.create_text(fx + 8, y + frame_h/2, text=f"F{frame}", fill=COLORS["text_secondary"], font=("JetBrains Mono", 9), anchor="w")
+            c.create_text(fx + fw - 8, y + frame_h/2, text=item["label"], fill=COLORS["text_primary"], font=("JetBrains Mono", 9), anchor="e")
+
+        if address:
+            c.create_text(60, 315, text="Address Translation", fill=COLORS["text_primary"], font=("Inter", 14, "bold"), anchor="w")
+            formula = f"LA {result['logical_address']}K → p={address['p']}, d={address['d']} → frame={address['f']} → PA={address['pa']}K"
+            c.create_rectangle(60, 335, 780, 365, fill=COLORS["status_running_bg"], outline=COLORS["border"])
+            c.create_text(70, 350, text=formula, fill=COLORS["secondary"], font=("JetBrains Mono", 11, "bold"), anchor="w")
+        else:
+            c.create_text(60, 335, text=f"Internal fragmentation: {result['internal_fragmentation']}K", fill=COLORS["secondary"], font=("JetBrains Mono", 11, "bold"), anchor="w")
 
 
 class PlaceholderPage(ctk.CTkFrame):
@@ -2366,6 +3119,10 @@ class OSSimulatorApp(ctk.CTk):
         cpu.grid(row=0, column=0, sticky="nsew")
         self.pages["CPU Scheduling"] = cpu
 
+        memory = MemoryManagementPage(self.content)
+        memory.grid(row=0, column=0, sticky="nsew")
+        self.pages["Memory Management"] = memory
+
         vm = VirtualMemoryPage(self.content)
         vm.grid(row=0, column=0, sticky="nsew")
         self.pages["Virtual Memory"] = vm
@@ -2375,7 +3132,6 @@ class OSSimulatorApp(ctk.CTk):
         self.pages["Disk Management"] = disk
 
         placeholder_modules = [
-            ("Memory Management",   "Memory Management",   "🗂"),
             ("Security Management", "Security Management", "🛡"),
         ]
         for page_key, title, icon in placeholder_modules:
