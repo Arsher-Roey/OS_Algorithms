@@ -1,4 +1,4 @@
-from algorithms import fifo, optimal, lru, lru_approximation, counting_based
+from algorithms import fifo, optimal, lru, lru_approximation, counting_based, memory_management, cpu_scheduling, deadlock
 
 REGISTRY: dict = {
     "FIFO (First-In First-Out)":      fifo,
