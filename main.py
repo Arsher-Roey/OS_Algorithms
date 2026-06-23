@@ -12,6 +12,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import algorithms
 from algorithms.disk_scheduling import DISK_REGISTRY, DIRECTION_ALGORITHMS
 from algorithms import memory_management as memalgo
+from algorithms import deadlock 
+from algorithms import DEADLOCK_REGISTRY
+
 
 
 COLORS = {
@@ -1999,6 +2002,391 @@ class MemoryManagementPage(ctk.CTkFrame):
         else:
             c.create_text(60, 335, text=f"Internal fragmentation: {result['internal_fragmentation']}K", fill=COLORS["secondary"], font=("JetBrains Mono", 11, "bold"), anchor="w")
 
+class SecurityManagementPage(ctk.CTkFrame):
+
+    def __init__(self, master, **kwargs):
+        super().__init__(master, fg_color=COLORS["bg"], corner_radius=0, **kwargs)
+
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=0)
+        self.rowconfigure(0, weight=1)
+
+        self._build_main_area()
+        self._build_parameters_panel()
+        self._load_sample_values()
+        self._draw_empty_state()
+
+    def _build_main_area(self):
+        main = ctk.CTkScrollableFrame(
+            self,
+            fg_color="transparent",
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["primary"],
+        )
+        main.grid(row=0, column=0, sticky="nsew", padx=(32, 16), pady=24)
+        main.columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            main,
+            text="Security Management Module",
+            font=FONTS["headline_lg"],
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x")
+
+        ctk.CTkLabel(
+            main,
+            text="Run Banker's Algorithm to check whether the system is in a safe state.",
+            font=FONTS["body_md"],
+            text_color=COLORS["text_secondary"],
+            anchor="w",
+        ).pack(fill="x", pady=(4, 20))
+
+        self.summary_row = ctk.CTkFrame(main, fg_color="transparent")
+        self.summary_row.pack(fill="x", pady=(0, 14))
+        self._make_summary_card("Status", "Waiting", "status")
+        self._make_summary_card("Safe Sequence", "—", "sequence")
+
+        bottom_grid = ctk.CTkFrame(main, fg_color="transparent")
+        bottom_grid.pack(fill="both", expand=True)
+        bottom_grid.columnconfigure(0, weight=2)
+        bottom_grid.columnconfigure(1, weight=1)
+
+        self.log_card = ctk.CTkFrame(
+            bottom_grid,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self.log_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        ctk.CTkLabel(
+            self.log_card,
+            text="Algorithm Steps",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(14, 6))
+        self.step_output = ctk.CTkTextbox(
+            self.log_card,
+            height=320,
+            fg_color=COLORS["bg_card"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=10,
+            font=FONTS["data_sm"],
+            text_color=COLORS["text_secondary"],
+            wrap="word",
+        )
+        self.step_output.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        self.step_output.configure(state="disabled")
+
+        self.result_card = ctk.CTkFrame(
+            bottom_grid,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["primary"],
+        )
+        self.result_card.grid(row=0, column=1, sticky="nsew")
+        ctk.CTkLabel(
+            self.result_card,
+            text="Results Summary",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["secondary"],
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(14, 6))
+        self.results_box = ctk.CTkFrame(self.result_card, fg_color="transparent")
+        self.results_box.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+
+    def _make_summary_card(self, label, value, key):
+        card = ctk.CTkFrame(
+            self.summary_row,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        card.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        ctk.CTkLabel(
+            card,
+            text=label.upper(),
+            font=FONTS["label_caps"],
+            text_color=COLORS["text_muted"],
+        ).pack(anchor="w", padx=14, pady=(10, 0))
+        value_label = ctk.CTkLabel(
+            card,
+            text=value,
+            font=FONTS["metric_val"],
+            text_color=COLORS["primary_light"],
+            anchor="w",
+            wraplength=420,
+            justify="left",
+        )
+        value_label.pack(fill="x", padx=14, pady=(3, 10))
+        setattr(self, f"summary_{key}", value_label)
+
+    def _build_parameters_panel(self):
+        self.params = ctk.CTkScrollableFrame(
+            self,
+            width=260,
+            fg_color=COLORS["bg_panel"],
+            corner_radius=0,
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["primary"],
+        )
+        self.params.grid(row=0, column=1, sticky="nsew")
+
+        ctk.CTkLabel(
+            self.params,
+            text="Parameters",
+            font=FONTS["headline_sm"],
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x", padx=20, pady=(24, 22))
+
+        self._section_label(self.params, "ALGORITHM")
+        ctk.CTkLabel(
+            self.params,
+            text="Banker's Algorithm",
+            font=FONTS["body_md"],
+            text_color=COLORS["text_secondary"],
+            anchor="w",
+        ).pack(fill="x", padx=20, pady=(0, 18))
+
+        self._section_label(self.params, "PROCESSES")
+        self.processes_entry = self._entry(self.params, "P0, P1, P2, P3, P4")
+        self._hint(self.params, "Comma-separated process names.")
+
+        self._section_label(self.params, "RESOURCES")
+        self.resources_entry = self._entry(self.params, "A, B, C")
+        self._hint(self.params, "Comma-separated resource types.")
+
+        self._section_label(self.params, "AVAILABLE")
+        self.available_entry = self._entry(self.params, "3, 3, 2")
+        self._hint(self.params, "Free units for each resource type.")
+
+        self._section_label(self.params, "ALLOCATION MATRIX")
+        self.allocation_box = self._textbox(self.params, height=110)
+        self._hint(self.params, "One row per process. Example: 0, 1, 0")
+
+        self._section_label(self.params, "MAXIMUM MATRIX")
+        self.maximum_box = self._textbox(self.params, height=110)
+        self._hint(self.params, "One row per process. Example: 7, 5, 3")
+
+        self._divider(self.params)
+        ctk.CTkButton(
+            self.params,
+            text="Run Simulation",
+            font=FONTS["button"],
+            height=44,
+            corner_radius=8,
+            fg_color=COLORS["primary"],
+            hover_color=COLORS["primary_light"],
+            command=self._run_simulation,
+        ).pack(fill="x", padx=20, pady=(16, 10))
+
+        ctk.CTkButton(
+            self.params,
+            text="Load Sample",
+            font=FONTS["button"],
+            height=40,
+            corner_radius=8,
+            fg_color=COLORS["bg_elevated"],
+            hover_color=COLORS["bg_highest"],
+            command=self._load_sample_values,
+        ).pack(fill="x", padx=20, pady=(0, 10))
+
+        ctk.CTkButton(
+            self.params,
+            text="Clear Output",
+            font=FONTS["button"],
+            height=40,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLORS["border"],
+            hover_color=COLORS["bg_elevated"],
+            command=self._draw_empty_state,
+        ).pack(fill="x", padx=20, pady=(0, 24))
+
+    def _section_label(self, parent, text):
+        ctk.CTkLabel(
+            parent,
+            text=text,
+            font=FONTS["label_caps"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
+        ).pack(fill="x", padx=20, pady=(10, 7))
+
+    def _hint(self, parent, text):
+        ctk.CTkLabel(
+            parent,
+            text=text,
+            font=FONTS["body_sm"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
+            wraplength=210,
+            justify="left",
+        ).pack(fill="x", padx=20, pady=(0, 10))
+
+    def _entry(self, parent, placeholder):
+        entry = ctk.CTkEntry(
+            parent,
+            height=34,
+            fg_color=COLORS["bg_elevated"],
+            border_color=COLORS["border"],
+            placeholder_text=placeholder,
+            text_color=COLORS["text_primary"],
+        )
+        entry.pack(fill="x", padx=20, pady=(0, 8))
+        return entry
+
+    def _textbox(self, parent, height=100):
+        box = ctk.CTkTextbox(
+            parent,
+            height=height,
+            fg_color=COLORS["bg_elevated"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=8,
+            font=FONTS["data_sm"],
+            text_color=COLORS["text_primary"],
+            wrap="none",
+        )
+        box.pack(fill="x", padx=20, pady=(0, 8))
+        return box
+
+    def _divider(self, parent):
+        ctk.CTkFrame(parent, fg_color=COLORS["border"], height=1).pack(fill="x", padx=20, pady=(12, 4))
+
+    def _load_sample_values(self):
+        sample = deadlock.sample_bankers_scenario()
+        self.processes_entry.delete(0, "end")
+        self.processes_entry.insert(0, ", ".join(sample["processes"]))
+        self.resources_entry.delete(0, "end")
+        self.resources_entry.insert(0, ", ".join(sample["resources"]))
+        self.available_entry.delete(0, "end")
+        self.available_entry.insert(0, ", ".join(str(x) for x in sample["available"]))
+        self.allocation_box.delete("1.0", "end")
+        self.allocation_box.insert(
+            "1.0",
+            "\n".join(", ".join(str(x) for x in row) for row in sample["allocation"]),
+        )
+        self.maximum_box.delete("1.0", "end")
+        self.maximum_box.insert(
+            "1.0",
+            "\n".join(", ".join(str(x) for x in row) for row in sample["maximum"]),
+        )
+
+    def _parse_csv_line(self, text):
+        return [int(x.strip()) for x in text.replace(";", ",").split(",") if x.strip()]
+
+    def _parse_names(self, text):
+        return [x.strip() for x in text.replace(";", ",").split(",") if x.strip()]
+
+    def _parse_matrix(self, textbox):
+        rows = []
+        for line in textbox.get("1.0", "end").strip().splitlines():
+            if line.strip():
+                rows.append(self._parse_csv_line(line))
+        return rows
+
+    def _set_steps(self, text):
+        self.step_output.configure(state="normal")
+        self.step_output.delete("1.0", "end")
+        self.step_output.insert("1.0", text)
+        self.step_output.configure(state="disabled")
+
+    def _set_results(self, rows):
+        for widget in self.results_box.winfo_children():
+            widget.destroy()
+        for label, value in rows:
+            row = ctk.CTkFrame(self.results_box, fg_color="transparent")
+            row.pack(fill="x", pady=4)
+            ctk.CTkLabel(
+                row,
+                text=label,
+                font=FONTS["body_sm"],
+                text_color=COLORS["text_muted"],
+                width=110,
+                anchor="w",
+            ).pack(side="left")
+            ctk.CTkLabel(
+                row,
+                text=value,
+                font=FONTS["data_sm"],
+                text_color=COLORS["text_primary"],
+                anchor="w",
+                wraplength=120,
+                justify="left",
+            ).pack(side="left", fill="x", expand=True)
+
+    def _run_simulation(self):
+        try:
+            processes = self._parse_names(self.processes_entry.get())
+            resources = self._parse_names(self.resources_entry.get())
+            available = self._parse_csv_line(self.available_entry.get())
+            allocation = self._parse_matrix(self.allocation_box)
+            maximum = self._parse_matrix(self.maximum_box)
+        except ValueError:
+            self.summary_status.configure(text="Error")
+            self.summary_sequence.configure(text="—")
+            self._set_steps("Please use whole numbers in Available, Allocation, and Maximum.")
+            self._set_results([("Status", "Invalid input")])
+            return
+
+        algo_fn = DEADLOCK_REGISTRY["Banker's Algorithm"]
+        result = algo_fn(
+            processes=processes,
+            resources=resources,
+            available=available,
+            allocation=allocation,
+            maximum=maximum,
+        )
+
+        if not result.get("valid"):
+            self.summary_status.configure(text="Error")
+            self.summary_sequence.configure(text="—")
+            self._set_steps(result.get("error", "Invalid input."))
+            self._set_results([("Status", "Invalid input")])
+            return
+
+        if result["safe"]:
+            status = "Safe"
+            sequence = " -> ".join(result["safe_sequence"])
+        else:
+            status = "Unsafe"
+            sequence = "None"
+
+        self.summary_status.configure(text=status)
+        self.summary_sequence.configure(text=sequence)
+        self._set_steps("\n".join(f"{i + 1}. {step}" for i, step in enumerate(result["steps"])))
+
+        need_rows = []
+        for i, proc in enumerate(processes):
+            need_vals = ", ".join(f"{resources[j]}={result['need'][i][j]}" for j in range(len(resources)))
+            need_rows.append(f"{proc}: {need_vals}")
+        blocked = [processes[i] for i, done in enumerate(result["finish"]) if not done]
+
+        self._set_results([
+            ("Algorithm", "Banker's"),
+            ("Processes", str(len(processes))),
+            ("Resources", str(len(resources))),
+            ("Safe State", status),
+            ("Blocked", ", ".join(blocked) if blocked else "None"),
+            ("Need", "\n".join(need_rows)),
+        ])
+
+    def _draw_empty_state(self):
+        self.summary_status.configure(text="Waiting")
+        self.summary_sequence.configure(text="—")
+        self._set_steps("Load the sample data or enter matrices, then click Run Simulation.")
+        self._set_results([
+            ("Status", "Waiting"),
+            ("Algorithm", "Banker's"),
+        ])
+
 
 class PlaceholderPage(ctk.CTkFrame):
 
@@ -3436,13 +3824,9 @@ class OSSimulatorApp(ctk.CTk):
         disk.grid(row=0, column=0, sticky="nsew")
         self.pages["Disk Management"] = disk
 
-        placeholder_modules = [
-            ("Security Management", "Security Management", "🛡"),
-        ]
-        for page_key, title, icon in placeholder_modules:
-            page = PlaceholderPage(self.content, title=title, icon=icon)
-            page.grid(row=0, column=0, sticky="nsew")
-            self.pages[page_key] = page
+        security = SecurityManagementPage(self.content)
+        security.grid(row=0, column=0, sticky="nsew")
+        self.pages["Security Management"] = security
 
     def navigate(self, page_key):
         if page_key in self.pages:

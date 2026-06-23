@@ -90,7 +90,7 @@ def _merge_holes(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
             merged[-1]["size"] += block["size"]
         else:
             merged.append(block.copy())
-    # Recompute starts after merges to avoid small drift.
+    # Recompute 
     pos = 0
     for block in merged:
         block["start"] = pos
